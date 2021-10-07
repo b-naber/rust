@@ -202,6 +202,51 @@ fn inner_resolve_instance<'tcx>(
     result
 }
 
+struct TypeInfoVisitor {
+    pub has_bound_vars: bool,
+}
+
+impl TypeInfoVisitor {
+    fn new() -> TypeInfoVisitor {
+        TypeInfoVisitor { has_bound_vars: false }
+    }
+}
+
+impl<'tcx> TypeVisitor<'tcx> for TypeInfoVisitor {
+    type BreakTy = ();
+
+    fn tcx_for_anon_const_substs(&self) -> Option<TyCtxt<'tcx>> {
+        // Anonymous constants do not contain bound vars in their substs by default.
+        None
+    }
+    fn visit_binder<T: TypeFoldable<'tcx>>(
+        &mut self,
+        t: &Binder<'tcx, T>,
+    ) -> ControlFlow<Self::BreakTy> {
+        let result = t.super_visit_with(self);
+        result
+    }
+
+    #[instrument(level = "debug", skip(self))]
+    fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
+        debug!("t.kind: {:?}", t.kind());
+        match t.kind() {
+            ty::Infer(_) => debug!("infer var"),
+            ty::Placeholder(_) => debug!("placeholder"),
+            ty::Param(_) => debug!("param"),
+            ty::Bound(_, _) => {
+                debug!("BoundVar");
+                self.has_bound_vars = true;
+            }
+            _ => debug!("neither infer, placeholder nor param"),
+        }
+        t.super_visit_with(self)
+    }
+    fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
+        r.super_visit_with(self)
+    }
+}
+
 fn resolve_associated_item<'tcx>(
     tcx: TyCtxt<'tcx>,
     trait_item: &ty::AssocItem,
@@ -218,12 +263,37 @@ fn resolve_associated_item<'tcx>(
         def_id, param_env, trait_id, rcvr_substs
     );
 
+    let mut type_info_visitor = TypeInfoVisitor::new();
+    rcvr_substs.visit_with(&mut type_info_visitor);
+    debug!(?rcvr_substs);
+    let substs_have_infer_vars_or_placeholders =
+        rcvr_substs.has_infer_types_or_consts() | rcvr_substs.has_placeholders();
+    let has_bound_vars = type_info_visitor.has_bound_vars;
+    debug!(?has_bound_vars);
+    debug!(?substs_have_infer_vars_or_placeholders);
+
+    if substs_have_infer_vars_or_placeholders | has_bound_vars {
+        return Ok(None);
+    }
+
     let trait_ref = ty::TraitRef::from_method(tcx, trait_id, rcvr_substs);
+
+    let has_infer_vars_or_placeholders =
+        trait_ref.has_infer_types_or_consts() | trait_ref.has_placeholders();
+    debug!(?has_infer_vars_or_placeholders);
+
+    if has_infer_vars_or_placeholders {
+        return Ok(None);
+    }
 
     // See FIXME on `BoundVarsCollector`.
     let mut bound_vars_collector = BoundVarsCollector::new();
     trait_ref.visit_with(&mut bound_vars_collector);
-    let trait_binder = ty::Binder::bind_with_vars(trait_ref, bound_vars_collector.into_vars(tcx));
+    let vars = bound_vars_collector.into_vars(tcx);
+    debug!(?vars);
+    let trait_binder = ty::Binder::bind_with_vars(trait_ref, vars);
+    debug!(?trait_binder);
+
     let vtbl = tcx.codegen_fulfill_obligation((param_env, trait_binder))?;
 
     // Now that we know which impl is being used, we can dispatch to
