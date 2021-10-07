@@ -647,6 +647,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     }
 
     /// Select as many obligations as we can at present.
+    #[instrument(level = "debug", skip(self, mutate_fulfillment_errors))]
     pub(in super::super) fn select_obligations_where_possible(
         &self,
         fallback_has_occurred: bool,

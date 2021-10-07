@@ -1095,14 +1095,18 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         self.tcx.mk_ty_var(self.next_ty_var_id(Diverging::Diverges, origin))
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn next_const_var(
         &self,
         ty: Ty<'tcx>,
         origin: ConstVariableOrigin,
     ) -> &'tcx ty::Const<'tcx> {
-        self.tcx.mk_const_var(self.next_const_var_id(origin), ty)
+        let var_id = self.next_const_var_id(origin);
+        debug!(?var_id);
+        self.tcx.mk_const_var(var_id, ty)
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn next_const_var_in_universe(
         &self,
         ty: Ty<'tcx>,
@@ -1114,14 +1118,18 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
             .borrow_mut()
             .const_unification_table()
             .new_key(ConstVarValue { origin, val: ConstVariableValue::Unknown { universe } });
+        debug!(?vid);
         self.tcx.mk_const_var(vid, ty)
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn next_const_var_id(&self, origin: ConstVariableOrigin) -> ConstVid<'tcx> {
-        self.inner.borrow_mut().const_unification_table().new_key(ConstVarValue {
+        let var_id = self.inner.borrow_mut().const_unification_table().new_key(ConstVarValue {
             origin,
             val: ConstVariableValue::Unknown { universe: self.universe() },
-        })
+        });
+        debug!(?var_id);
+        var_id
     }
 
     fn next_int_var_id(&self) -> IntVid {

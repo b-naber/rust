@@ -1,0 +1,25 @@
+__Solution Sketch__
+
+- Lets introduce some type that encodes an unevaluated const that contains an inference variable and hence cannot
+  be evaluated yet.
+- I think we might need a method `is_evaluatable` on `Const::Unevaluated` that checks whether there are infer vars
+  in substs. If `is_evaluatable` returns false we will never try to call `const_eval_resolve` on it.
+  |-> Not sure whether this should be part of `const_eval_resolve` or whether we expect this to be called prior
+      to `const_eval_resolve`.
+- Need to modify ConstEquate arm of `progress_changed_obligations`
+- Think I also need to change how `ConstEquate` obligations are processed, specifically I need to allow them
+  to be stalled on `EvalPostponed`. Need to modify `ty_or_const_infer_var_changed` I think.
+- We treat these value similar to inference variables, so if we relate some ConstInfer with another Const then
+  we allow this type relation to pass, but encode this relationship in some table.
+- We will have a function that tries to resolve those unevaluated consts at all times, i.e. whenever we encounter
+  a specific ConstInfer we try to see if its substs still contain inference vars. If all infer vars are resolved
+  then we can evaluate the const
+- If some type relations between ConstInfers turns out to be wrong, we output an error (need to collect good 
+  diagnostics information for this)
+- At the end of typeck we will see whether we have any unevaluated ConstInfers and output errors for those
+  -> Need a mechanism similar to `unsolved_variables` for type inference variables for this
+
+questions:
+
+|-> What exactly does `is_const_evaluatable` do? Why do we analyze an AbstractConst there? Does this in any way
+    tell us about whether `const_eval_resolve` will succeed?

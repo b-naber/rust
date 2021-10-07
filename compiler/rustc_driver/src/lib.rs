@@ -563,7 +563,11 @@ fn handle_explain(registry: Registry, code: &str, output: ErrorOutputType) {
 
 fn show_content_with_pager(content: &str) {
     let pager_name = env::var_os("PAGER").unwrap_or_else(|| {
-        if cfg!(windows) { OsString::from("more.com") } else { OsString::from("less") }
+        if cfg!(windows) {
+            OsString::from("more.com")
+        } else {
+            OsString::from("less")
+        }
     });
 
     let mut fallback_to_println = false;
@@ -1132,7 +1136,11 @@ fn extra_compiler_flags() -> Option<(Vec<String>, bool)> {
         }
     }
 
-    if !result.is_empty() { Some((result, excluded_cargo_defaults)) } else { None }
+    if !result.is_empty() {
+        Some((result, excluded_cargo_defaults))
+    } else {
+        None
+    }
 }
 
 /// Runs a closure and catches unwinds triggered by fatal errors.
@@ -1284,10 +1292,24 @@ pub fn init_env_logger(env: &str) {
     let filter = tracing_subscriber::EnvFilter::from_env(env);
     let layer = tracing_tree::HierarchicalLayer::default()
         .with_writer(io::stderr)
-        .with_indent_lines(true)
+        .with_indent_lines(false)
         .with_ansi(color_logs)
         .with_targets(true)
+        .with_verbose_exit(false)
         .with_indent_amount(2);
+
+    /*
+    let layer = tracing_tree::HierarchicalLayer::default()
+        .with_writer(io::stderr)
+        .with_indent_lines(false)
+        .with_ansi(color_logs)
+        .with_targets(true)
+        .with_ansi(color_logs)
+        .with_wraparound(10)
+        .with_verbose_exit(false)
+        .with_verbose_exit(false)
+        .with_indent_amount(2);
+    */
     #[cfg(parallel_compiler)]
     let layer = layer.with_thread_ids(true).with_thread_names(true);
 

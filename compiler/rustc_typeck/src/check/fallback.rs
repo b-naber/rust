@@ -5,6 +5,7 @@ use rustc_middle::ty::{self, Ty};
 impl<'tcx> FnCtxt<'_, 'tcx> {
     /// Performs type inference fallback, returning true if any fallback
     /// occurs.
+    #[instrument(level = "debug", skip(self))]
     pub(super) fn type_inference_fallback(&self) -> bool {
         // All type checking constraints were added, try to fallback unsolved variables.
         self.select_obligations_where_possible(false, |_| {});

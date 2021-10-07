@@ -446,15 +446,19 @@ fn typeck_with_fallback<'tcx>(
 
             // Gather locals in statics (because of block expressions).
             GatherLocalsVisitor::new(&fcx).visit_body(body);
+            debug!("finished GatherLocalsVisit");
 
             fcx.check_expr_coercable_to_type(&body.value, expected_type, None);
+            debug!("checked expr coercable to type");
 
             fcx.write_ty(id, expected_type);
+            debug!("wrote_ty");
 
             (fcx, FxHashSet::default())
         };
 
         let fallback_has_occurred = fcx.type_inference_fallback();
+        debug!(?fallback_has_occurred);
 
         // Even though coercion casts provide type hints, we check casts after fallback for
         // backwards compatibility. This makes fallback a stronger type hint than a cast coercion.
