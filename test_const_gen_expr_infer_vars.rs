@@ -24,6 +24,9 @@ pub fn bar() {
     //foo::<u8>([0; 1]);
 
     // This ICEs
+    let _ : u8 = foo([0; 1]);
+
+    // type check error caught after stalls
     let _ = foo([0; 1]);
 }
 

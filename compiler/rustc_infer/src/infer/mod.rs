@@ -21,6 +21,7 @@ use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_middle::infer::canonical::{Canonical, CanonicalVarValues};
 use rustc_middle::infer::unify_key::{ConstVarValue, ConstVariableValue};
 use rustc_middle::infer::unify_key::{ConstVariableOrigin, ConstVariableOriginKind, ToType};
+use rustc_middle::mir::interpret::error::ErrorHandled;
 use rustc_middle::mir::interpret::EvalToConstValueResult;
 use rustc_middle::traits::select;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
@@ -1610,6 +1611,11 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         span: Option<Span>,
     ) -> EvalToConstValueResult<'tcx> {
         let mut original_values = OriginalQueryValues::default();
+
+        if unevaluated.substs(self.tcx).has_infer_types_or_consts() {
+            return Err(ErrorHandled::TooGeneric);
+        }
+
         let canonical = self.canonicalize_query((param_env, unevaluated), &mut original_values);
 
         let (param_env, unevaluated) = canonical.value;
