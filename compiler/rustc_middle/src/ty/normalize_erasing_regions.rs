@@ -36,6 +36,10 @@ impl<'tcx> TyCtxt<'tcx> {
     ///
     /// This is appropriate to use only after type-check: it assumes
     /// that normalization will succeed, for example.
+    ///
+    /// Note: This will panic if normalization doesn't succeed. If you plan to
+    /// call this before typeck has finished, use `try_normalize_erasing_regions`
+    /// instead.
     pub fn normalize_erasing_regions<T>(self, param_env: ty::ParamEnv<'tcx>, value: T) -> T
     where
         T: TypeFoldable<'tcx>,
