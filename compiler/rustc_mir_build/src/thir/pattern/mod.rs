@@ -17,7 +17,7 @@ use rustc_hir::RangeEnd;
 use rustc_index::vec::Idx;
 use rustc_middle::mir::interpret::{get_slice_bytes, ConstValue};
 use rustc_middle::mir::interpret::{ErrorHandled, LitToConstError, LitToConstInput};
-use rustc_middle::mir::UserTypeProjection;
+use rustc_middle::mir::{self, UserTypeProjection};
 use rustc_middle::mir::{BorrowKind, Field, Mutability};
 use rustc_middle::thir::{Ascription, BindingMode, FieldPat, Pat, PatKind, PatRange, PatTyProj};
 use rustc_middle::ty::subst::{GenericArg, SubstsRef};
@@ -121,8 +121,8 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
     fn lower_pattern_range(
         &mut self,
         ty: Ty<'tcx>,
-        lo: ty::Const<'tcx>,
-        hi: ty::Const<'tcx>,
+        lo: mir::ConstantKind<'tcx>,
+        hi: mir::ConstantKind<'tcx>,
         end: RangeEnd,
         span: Span,
     ) -> PatKind<'tcx> {
@@ -177,16 +177,24 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
         ty: Ty<'tcx>,
         lo: Option<&PatKind<'tcx>>,
         hi: Option<&PatKind<'tcx>>,
-    ) -> Option<(ty::Const<'tcx>, ty::Const<'tcx>)> {
+    ) -> Option<(mir::ConstantKind<'tcx>, mir::ConstantKind<'tcx>)> {
         match (lo, hi) {
             (Some(PatKind::Constant { value: lo }), Some(PatKind::Constant { value: hi })) => {
                 Some((*lo, *hi))
             }
             (Some(PatKind::Constant { value: lo }), None) => {
-                Some((*lo, ty.numeric_max_val(self.tcx)?))
+                let hi = ty.numeric_max_val(self.tcx)?;
+                Some((
+                    *lo,
+                    mir::ConstantKind::from_bits(self.tcx, hi, ty::ParamEnv::empty().and(ty)),
+                ))
             }
             (None, Some(PatKind::Constant { value: hi })) => {
-                Some((ty.numeric_min_val(self.tcx)?, *hi))
+                let lo = ty.numeric_min_val(self.tcx)?;
+                Some((
+                    mir::ConstantKind::from_bits(self.tcx, lo, ty::ParamEnv::empty().and(ty)),
+                    *hi,
+                ))
             }
             _ => None,
         }
@@ -537,25 +545,30 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
         span: Span,
     ) -> PatKind<'tcx> {
         let anon_const_def_id = self.tcx.hir().local_def_id(anon_const.hir_id);
-        let value = ty::Const::from_inline_const(self.tcx, anon_const_def_id);
+        let value = mir::ConstantKind::from_inline_const(self.tcx, anon_const_def_id);
 
         // Evaluate early like we do in `lower_path`.
         let value = value.eval(self.tcx, self.param_env);
 
-        match value.val() {
-            ConstKind::Param(_) => {
-                self.errors.push(PatternError::ConstParamInPattern(span));
-                return PatKind::Wild;
+        match value {
+            mir::ConstantKind::Ty(c) => {
+                match c.val() {
+                    ConstKind::Param(_) => {
+                        self.errors.push(PatternError::ConstParamInPattern(span));
+                        return PatKind::Wild;
+                    }
+                    ConstKind::Unevaluated(_) => {
+                        // If we land here it means the const can't be evaluated because it's `TooGeneric`.
+                        self.tcx
+                            .sess
+                            .span_err(span, "constant pattern depends on a generic parameter");
+                        return PatKind::Wild;
+                    }
+                    _ => bug!("Expected either ConstKind::Param or ConstKind::Unevaluated"),
+                }
             }
-            ConstKind::Unevaluated(_) => {
-                // If we land here it means the const can't be evaluated because it's `TooGeneric`.
-                self.tcx.sess.span_err(span, "constant pattern depends on a generic parameter");
-                return PatKind::Wild;
-            }
-            _ => (),
+            mir::ConstantKind::Val(_, _) => *self.const_to_pat(value, id, span, false).kind,
         }
-
-        *self.const_to_pat(value, id, span, false).kind
     }
 
     /// Converts literals, paths and negation of literals to patterns.
@@ -740,8 +753,8 @@ impl<'tcx> PatternFoldable<'tcx> for PatKind<'tcx> {
 #[instrument(skip(tcx), level = "debug")]
 crate fn compare_const_vals<'tcx>(
     tcx: TyCtxt<'tcx>,
-    a: ty::Const<'tcx>,
-    b: ty::Const<'tcx>,
+    a: mir::ConstantKind<'tcx>,
+    b: mir::ConstantKind<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     ty: Ty<'tcx>,
 ) -> Option<Ordering> {
@@ -756,7 +769,8 @@ crate fn compare_const_vals<'tcx>(
 
     // Early return for equal constants (so e.g. references to ZSTs can be compared, even if they
     // are just integer addresses).
-    if a.val() == b.val() {
+    // FIXME This might be wrong
+    if a == b {
         return from_bool(true);
     }
 

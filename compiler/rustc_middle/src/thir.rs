@@ -193,7 +193,7 @@ pub enum StmtKind<'tcx> {
 
 // `Expr` is used a lot. Make sure it doesn't unintentionally get bigger.
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-rustc_data_structures::static_assert_size!(Expr<'_>, 104);
+rustc_data_structures::static_assert_size!(Expr<'_>, 144);
 
 /// A THIR expression.
 #[derive(Clone, Debug, HashStable)]
@@ -662,7 +662,7 @@ pub enum PatKind<'tcx> {
     /// * Opaque constants, that must not be matched structurally. So anything that does not derive
     ///   `PartialEq` and `Eq`.
     Constant {
-        value: ty::Const<'tcx>,
+        value: mir::ConstantKind<'tcx>,
     },
 
     Range(PatRange<'tcx>),
@@ -692,8 +692,8 @@ pub enum PatKind<'tcx> {
 
 #[derive(Copy, Clone, Debug, PartialEq, HashStable)]
 pub struct PatRange<'tcx> {
-    pub lo: ty::Const<'tcx>,
-    pub hi: ty::Const<'tcx>,
+    pub lo: mir::ConstantKind<'tcx>,
+    pub hi: mir::ConstantKind<'tcx>,
     pub end: RangeEnd,
 }
 
