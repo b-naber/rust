@@ -26,7 +26,11 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
 
     /// Convenience function for creating a literal operand, one
     /// without any user type annotation.
-    crate fn literal_operand(&mut self, span: Span, literal: ConstantKind<'tcx>) -> Operand<'tcx> {
+    crate fn literal_operand(
+        &mut self,
+        span: Span,
+        literal: mir::ConstantKind<'tcx>,
+    ) -> Operand<'tcx> {
         let constant = Box::new(Constant { span, user_ty: None, literal });
         Operand::Constant(constant)
     }
