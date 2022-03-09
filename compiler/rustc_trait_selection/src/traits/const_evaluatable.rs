@@ -243,7 +243,7 @@ impl<'tcx> AbstractConst<'tcx> {
         Ok(inner.map(|inner| AbstractConst { inner, substs: uv.substs }))
     }
 
-    pub fn from_constant(
+    pub fn from_const(
         tcx: TyCtxt<'tcx>,
         ct: ty::Const<'tcx>,
     ) -> Result<Option<AbstractConst<'tcx>>, ErrorGuaranteed> {
@@ -376,6 +376,10 @@ impl<'a, 'tcx> AbstractConstBuilder<'a, 'tcx> {
                 }
             }
 
+            fn visit_const(&mut self, ct: ty::Const<'tcx>) {
+                self.is_poly |= ct.has_param_types_or_consts();
+            }
+
             fn visit_constant(&mut self, ct: mir::ConstantKind<'tcx>) {
                 self.is_poly |= ct.has_param_types_or_consts();
             }
@@ -417,12 +421,23 @@ impl<'a, 'tcx> AbstractConstBuilder<'a, 'tcx> {
         self.recurse_build(self.body_id)?;
 
         for n in self.nodes.iter() {
+<<<<<<< HEAD
             if let Node::Leaf(ct) = n {
                 if let ty::ConstKind::Unevaluated(ct) = ct.val() {
                     // `AbstractConst`s should not contain any promoteds as they require references which
                     // are not allowed.
                     assert_eq!(ct.promoted, None);
                 }
+=======
+            if let Node::Leaf(ty::Const(Interned(
+                ty::ConstS { val: ty::ConstKind::Unevaluated(ct), ty: _ },
+                _,
+            ))) = n
+            {
+                // `AbstractConst`s should not contain any promoteds as they require references which
+                // are not allowed.
+                assert_eq!(ct.promoted, None);
+>>>>>>> ac60db231c9 (do use ty::Const in patterns and abstract consts)
             }
         }
 

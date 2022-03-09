@@ -141,7 +141,6 @@ impl IntRange {
         let ty = value.ty();
         if let Some((target_size, bias)) = Self::integral_size_and_signed_bias(tcx, ty) {
             let val = (|| {
-<<<<<<< HEAD
                 if let ty::ConstKind::Value(ConstValue::Scalar(scalar)) = value.val() {
                     // For this specific pattern we can skip a lot of effort and go
                     // straight to the result, after doing a bit of checking. (We
@@ -149,17 +148,6 @@ impl IntRange {
                     // is more general but much slower.)
                     if let Ok(bits) = scalar.to_bits_or_ptr_internal(target_size).unwrap() {
                         return Some(bits);
-=======
-                match value {
-                    mir::ConstantKind::Val(ConstValue::Scalar(scalar), _) => {
-                        // For this specific pattern we can skip a lot of effort and go
-                        // straight to the result, after doing a bit of checking. (We
-                        // could remove this branch and just fall through, which
-                        // is more general but much slower.)
-                        if let Ok(bits) = scalar.to_bits_or_ptr_internal(target_size) {
-                            return Some(bits);
-                        }
->>>>>>> b38077ea0b9 (change thir to use mir::ConstantKind instead of ty::Const)
                     }
                     mir::ConstantKind::Ty(c) => match c.val() {
                         ty::ConstKind::Value(_) => bug!(
