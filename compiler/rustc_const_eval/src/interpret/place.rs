@@ -82,7 +82,7 @@ rustc_data_structures::static_assert_size!(Place, 56);
 
 #[derive(Copy, Clone, Debug)]
 pub struct PlaceTy<'tcx, Tag: Provenance = AllocId> {
-    place: Place<Tag>, // Keep this private; it helps enforce invariants.
+    pub(crate) place: Place<Tag>, // Keep this private; it helps enforce invariants.
     pub layout: TyAndLayout<'tcx>,
 }
 
@@ -100,7 +100,7 @@ impl<'tcx, Tag: Provenance> std::ops::Deref for PlaceTy<'tcx, Tag> {
 /// A MemPlace with its layout. Constructing it is only possible in this module.
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub struct MPlaceTy<'tcx, Tag: Provenance = AllocId> {
-    mplace: MemPlace<Tag>,
+    pub(crate) mplace: MemPlace<Tag>,
     pub layout: TyAndLayout<'tcx>,
 }
 
@@ -595,6 +595,7 @@ where
     }
 
     /// Projects into a place.
+    #[instrument(skip(self), level = "debug")]
     pub fn place_projection(
         &mut self,
         base: &PlaceTy<'tcx, M::PointerTag>,
@@ -631,15 +632,18 @@ where
         &mut self,
         place: mir::Place<'tcx>,
     ) -> InterpResult<'tcx, PlaceTy<'tcx, M::PointerTag>> {
+        debug!("projection: {:?}", place.projection);
         let mut place_ty = PlaceTy {
             // This works even for dead/uninitialized locals; we check further when writing
             place: Place::Local { frame: self.frame_idx(), local: place.local },
             layout: self.layout_of_local(self.frame(), place.local, None)?,
         };
+        debug!(?place_ty);
 
         for elem in place.projection.iter() {
             place_ty = self.place_projection(&place_ty, &elem)?
         }
+        debug!("place aber projections: {:?}", place_ty);
 
         trace!("{:?}", self.dump_place(place_ty.place));
         // Sanity-check the type we ended up with.
@@ -695,6 +699,7 @@ where
     /// Write an immediate to a place.
     /// If you use this you are responsible for validating that things got copied at the
     /// right type.
+    #[instrument(skip(self), level = "debug")]
     fn write_immediate_no_validate(
         &mut self,
         src: Immediate<M::PointerTag>,
@@ -747,6 +752,7 @@ where
     /// Write an immediate to memory.
     /// If you use this you are responsible for validating that things got copied at the
     /// right type.
+    #[instrument(skip(self), level = "debug")]
     fn write_immediate_to_mplace_no_validate(
         &mut self,
         value: Immediate<M::PointerTag>,
@@ -769,6 +775,7 @@ where
         // cover all the bytes!
         match value {
             Immediate::Scalar(scalar) => {
+                debug!(?scalar);
                 match dest.layout.abi {
                     Abi::Scalar(_) => {} // fine
                     _ => span_bug!(
@@ -881,6 +888,7 @@ where
         // Let us see if the layout is simple so we take a shortcut, avoid force_allocation.
         let src = match self.try_read_immediate(src)? {
             Ok(src_val) => {
+                debug!("immediate from src is {:?}", src_val);
                 assert!(!src.layout.is_unsized(), "cannot have unsized immediates");
                 // Yay, we got a value that we can write directly.
                 // FIXME: Add a check to make sure that if `src` is indirect,
@@ -976,6 +984,7 @@ where
     ) -> InterpResult<'tcx, (MPlaceTy<'tcx, M::PointerTag>, Option<Size>)> {
         let (mplace, size) = match place.place {
             Place::Local { frame, local } => {
+                debug!("LocalPlace");
                 match M::access_local_mut(self, frame, local)? {
                     Ok(&mut local_val) => {
                         // We need to make an allocation.
@@ -990,8 +999,10 @@ where
                             .size_and_align_of(&meta, &local_layout)?
                             .expect("Cannot allocate for non-dyn-sized type");
                         let ptr = self.allocate_ptr(size, align, MemoryKind::Stack)?;
+                        debug!("allocated ptr: {:?}", ptr);
                         let mplace = MemPlace { ptr: ptr.into(), align, meta };
                         if let LocalValue::Live(Operand::Immediate(value)) = local_val {
+                            debug!("LocalValue::Live: immediate value {:?}", value);
                             // Preserve old value.
                             // We don't have to validate as we can assume the local
                             // was already valid for its type.

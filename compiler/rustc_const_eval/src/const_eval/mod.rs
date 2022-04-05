@@ -77,9 +77,7 @@ pub(crate) fn try_destructure_const<'tcx>(
     Ok(mir::DestructuredConst { variant, fields })
 }
 
-<<<<<<< HEAD
 #[instrument(skip(tcx), level = "debug")]
-=======
 pub(crate) fn destructure_mir_constant<'tcx>(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
@@ -115,6 +113,9 @@ pub(crate) fn destructure_mir_constant<'tcx>(
 }
 
 >>>>>>> 46a16603658 (change thir to use mir::ConstantKind instead of ty::Const)
+=======
+#[instrument(skip(tcx), level = "debug")]
+>>>>>>> 3ef9ce3e369 (implement valtree -> constvalue conversion)
 pub(crate) fn deref_const<'tcx>(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
