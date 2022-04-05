@@ -418,6 +418,7 @@ impl<Tag: Provenance, Extra> Allocation<Tag, Extra> {
     ///
     /// It is the caller's responsibility to check bounds and alignment beforehand.
     /// Most likely, you want to call `InterpCx::write_scalar` instead of this method.
+    #[instrument(skip(self, cx), level = "debug")]
     pub fn write_scalar(
         &mut self,
         cx: &impl HasDataLayout,
@@ -433,6 +434,7 @@ impl<Tag: Provenance, Extra> Allocation<Tag, Extra> {
                 return Ok(());
             }
         };
+        debug!(?val);
 
         // `to_bits_or_ptr_internal` is the right method because we just want to store this data
         // as-is into memory.
@@ -443,13 +445,16 @@ impl<Tag: Provenance, Extra> Allocation<Tag, Extra> {
             }
             Ok(data) => (data, None),
         };
+        debug!(?bytes, ?provenance);
 
         let endian = cx.data_layout().endian;
         let dst = self.get_bytes_mut(cx, range)?;
+        debug!(?dst);
         write_target_uint(endian, dst, bytes).unwrap();
 
         // See if we have to also write a relocation.
         if let Some(provenance) = provenance {
+            debug!("insert relocation for {:?}", provenance);
             self.relocations.0.insert(range.start, provenance);
         }
 
