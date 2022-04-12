@@ -11,6 +11,7 @@ use crate::interpret::{
     intern_const_alloc_recursive, ConstValue, InternKind, InterpCx, InterpResult, MemPlaceMeta,
     Scalar,
 };
+use valtrees::const_to_valtree_inner;
 
 mod error;
 mod eval_queries;
@@ -36,6 +37,26 @@ pub(crate) fn const_caller_location(
         bug!("intern_const_alloc_recursive should not error in this case")
     }
     ConstValue::Scalar(Scalar::from_pointer(loc_place.ptr.into_pointer_or_addr().unwrap(), &tcx))
+}
+
+/// Evaluates a constant and turns it into a type-level constant value.
+#[instrument(skip(tcx), level = "debug")]
+pub(crate) fn eval_to_valtree(
+    tcx: TyCtxt<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
+    cid: GlobalId<'tcx>,
+) -> EvalToValTreeResult<'tcx> {
+    let const_alloc = tcx.eval_to_allocation_raw(param_env.and(gid))?;
+    let ecx = mk_eval_cx(
+        tcx, DUMMY_SP, param_env,
+        // It is absolutely crucial for soundness that
+        // we do not read from static items or other mutable memory.
+        false,
+    );
+    let place = ecx.raw_const_to_mplace(raw).unwrap();
+    debug!(?place);
+
+    const_to_valtree_inner(&ecx, &place)
 }
 
 /// This function should never fail for validated constants. However, it is also invoked from the

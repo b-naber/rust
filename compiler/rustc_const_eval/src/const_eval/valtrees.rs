@@ -4,7 +4,7 @@ use crate::interpret::{
     intern_const_alloc_recursive, ConstValue, ImmTy, Immediate, InternKind, MemoryKind, PlaceTy,
     Pointer, Scalar, ScalarMaybeUninit,
 };
-use rustc_middle::mir::interpret::{ConstAlloc, GlobalAlloc};
+use rustc_middle::mir::interpret::{ConstAlloc, EvalToValTreeResult, GlobalAlloc};
 use rustc_middle::mir::{Field, ProjectionElem};
 use rustc_middle::ty::ScalarInt;
 use rustc_middle::ty::{self, Ty, TyCtxt};
@@ -13,23 +13,6 @@ use rustc_target::abi::VariantIdx;
 
 use crate::interpret::visitor::Value;
 use crate::interpret::MPlaceTy;
-
-/// Convert an evaluated constant to a type level constant
-#[instrument(skip(tcx), level = "debug")]
-pub(crate) fn const_to_valtree<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
-    raw: ConstAlloc<'tcx>,
-) -> Option<ty::ValTree<'tcx>> {
-    let ecx = mk_eval_cx(
-        tcx, DUMMY_SP, param_env,
-        // It is absolutely crucial for soundness that
-        // we do not read from static items or other mutable memory.
-        false,
-    );
-    let place = ecx.raw_const_to_mplace(raw).unwrap();
-    const_to_valtree_inner(&ecx, &place)
-}
 
 #[instrument(skip(ecx), level = "debug")]
 fn branches<'tcx>(
@@ -73,7 +56,7 @@ fn slice_branches<'tcx>(
 }
 
 #[instrument(skip(ecx), level = "debug")]
-fn const_to_valtree_inner<'tcx>(
+pub(super) fn const_to_valtree_inner<'tcx>(
     ecx: &CompileTimeEvalContext<'tcx, 'tcx>,
     place: &MPlaceTy<'tcx>,
 ) -> Option<ty::ValTree<'tcx>> {
@@ -200,7 +183,7 @@ fn create_mplace_from_layout<'tcx>(
 #[instrument(skip(tcx), level = "debug")]
 pub fn valtree_to_const_value<'tcx>(
     tcx: TyCtxt<'tcx>,
-    param_env_ty: ty::ParamEnvAnd<'tcx, Ty<'tcx>>,
+    ty: Ty<'tcx>,
     valtree: ty::ValTree<'tcx>,
 ) -> Option<ConstValue<'tcx>> {
     // Basic idea: We directly construct `Scalar` values from trivial `ValTree`s
@@ -210,8 +193,8 @@ pub fn valtree_to_const_value<'tcx>(
     // create inner `MPlace`s which are filled recursively.
     // FIXME Does this need an example?
 
-    let (param_env, ty) = param_env_ty.into_parts();
-    let mut ecx = mk_eval_cx(tcx, DUMMY_SP, param_env, false);
+    let mut ecx = mk_eval_cx(tcx, DUMMY_SP, ty::ParamEnv::empty(), false);
+    let param_env_ty = ty::ParamEnv::empty().and(ty);
 
     match ty.kind() {
         ty::FnDef(..) => None,

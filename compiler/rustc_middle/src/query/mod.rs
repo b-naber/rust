@@ -920,13 +920,18 @@ rustc_queries! {
         cache_on_disk_if { true }
     }
 
-    /// Convert an evaluated constant to a type level constant or
+    /// Evaluate a constant and convert it to a type level constant or
     /// return `None` if that is not possible.
-    query const_to_valtree(
-        key: ty::ParamEnvAnd<'tcx, ConstAlloc<'tcx>>
-    ) -> Option<ty::ValTree<'tcx>> {
+    query eval_to_valtree(
+        key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>
+    ) -> EvalToValTreeResult<'tcx> {
         desc { "destructure constant" }
         remap_env_constness
+    }
+
+    /// Converts a type level constant into a constant uses in the MIR.
+    query valtree_to_const_val(key: (Ty<'tcx>, ty::ValTree<'tcx>)) -> ConstValue<'tcx> {
+        desc { "convert ValTree to ConstValue" }
     }
 
     /// Destructure a constant ADT or array into its variant index and its
