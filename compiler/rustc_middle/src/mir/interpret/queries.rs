@@ -1,4 +1,4 @@
-use super::{ErrorHandled, EvalToConstValueResult, GlobalId};
+use super::{ErrorHandled, EvalToConstValueResult, EvalToValTreeResult, GlobalId};
 
 use crate::mir;
 use crate::ty::fold::TypeFoldable;
@@ -83,6 +83,24 @@ impl<'tcx> TyCtxt<'tcx> {
             self.at(span).eval_to_const_value_raw(inputs)
         } else {
             self.eval_to_const_value_raw(inputs)
+        }
+    }
+
+    /// Evaluate a constant to a type-level constant.
+    pub fn const_eval_global_id_for_typeck(
+        self,
+        param_env: ty::ParamEnv<'tcx>,
+        cid: GlobalId<'tcx>,
+        span: Option<Span>,
+    ) -> EvalToValTreeResult<'tcx> {
+        let param_env = param_env.with_const();
+        // Const-eval shouldn't depend on lifetimes at all, so we can erase them, which should
+        // improve caching of queries.
+        let inputs = self.erase_regions(param_env.and(cid));
+        if let Some(span) = span {
+            self.at(span).eval_to_valtree(inputs)
+        } else {
+            self.eval_to_valtree(inputs)
         }
     }
 

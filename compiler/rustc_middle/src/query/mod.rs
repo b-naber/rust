@@ -927,11 +927,11 @@ rustc_queries! {
         cache_on_disk_if { true }
     }
 
-    /// Convert an evaluated constant to a type level constant or
+    /// Evaluate a constant and convert it to a type level constant or
     /// return `None` if that is not possible.
-    query const_to_valtree(
-        key: ty::ParamEnvAnd<'tcx, ConstAlloc<'tcx>>
-    ) -> Option<ty::ValTree<'tcx>> {
+    query eval_to_valtree(
+        key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>
+    ) -> EvalToValTreeResult<'tcx> {
         desc { "destructure constant" }
         remap_env_constness
     }
