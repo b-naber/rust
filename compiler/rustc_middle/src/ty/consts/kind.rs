@@ -63,7 +63,7 @@ pub enum ConstKind<'tcx> {
     Unevaluated(Unevaluated<'tcx>),
 
     /// Used to hold computed value.
-    Value(ConstValue<'tcx>),
+    Value(ty::ValTree<'tcx>),
 
     /// A placeholder for a const which could not be computed; this is
     /// propagated to avoid useless error messages.
@@ -120,14 +120,15 @@ impl<'tcx> ConstKind<'tcx> {
     /// Tries to evaluate the constant if it is `Unevaluated`. If that doesn't succeed, return the
     /// unevaluated constant.
     pub fn eval(self, tcx: TyCtxt<'tcx>, param_env: ParamEnv<'tcx>) -> Self {
-        self.try_eval(tcx, param_env).and_then(Result::ok).map_or(self, ConstKind::Value)
+        self.try_eval_for_typeck(tcx, param_env).and_then(Result::ok).map_or(self, ConstKind::Value)
     }
 
     #[inline]
     /// Tries to evaluate the constant if it is `Unevaluated`. If that isn't possible or necessary
     /// return `None`.
     // FIXME(@lcnr): Completely rework the evaluation/normalization system for `ty::Const` once valtrees are merged.
-    pub fn try_eval(
+    // FIXME Extract common logic with `try_eval_for_typeck` into a function
+    pub fn try_eval_for_mir(
         self,
         tcx: TyCtxt<'tcx>,
         param_env: ParamEnv<'tcx>,
@@ -172,6 +173,63 @@ impl<'tcx> ConstKind<'tcx> {
                 // (which may be identity substs, see above),
                 // can leak through `val` into the const we return.
                 Ok(val) => Some(Ok(val)),
+                Err(ErrorHandled::TooGeneric | ErrorHandled::Linted) => None,
+                Err(ErrorHandled::Reported(e)) => Some(Err(e)),
+            }
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    /// Tries to evaluate the constant if it is `Unevaluated`. If that isn't possible or necessary
+    /// return `None`.
+    // FIXME(@lcnr): Completely rework the evaluation/normalization system for `ty::Const` once valtrees are merged.
+    pub fn try_eval_for_typeck(
+        self,
+        tcx: TyCtxt<'tcx>,
+        param_env: ParamEnv<'tcx>,
+    ) -> Option<Result<ty::ValTree<'tcx>, ErrorGuaranteed>> {
+        if let ConstKind::Unevaluated(unevaluated) = self {
+            use crate::mir::interpret::ErrorHandled;
+
+            // HACK(eddyb) this erases lifetimes even though `const_eval_resolve`
+            // also does later, but we want to do it before checking for
+            // inference variables.
+            // Note that we erase regions *before* calling `with_reveal_all_normalized`,
+            // so that we don't try to invoke this query with
+            // any region variables.
+            let param_env_and = tcx
+                .erase_regions(param_env)
+                .with_reveal_all_normalized(tcx)
+                .and(tcx.erase_regions(unevaluated));
+
+            // HACK(eddyb) when the query key would contain inference variables,
+            // attempt using identity substs and `ParamEnv` instead, that will succeed
+            // when the expression doesn't depend on any parameters.
+            // FIXME(eddyb, skinny121) pass `InferCtxt` into here when it's available, so that
+            // we can call `infcx.const_eval_resolve` which handles inference variables.
+            let param_env_and = if param_env_and.needs_infer() {
+                tcx.param_env(unevaluated.def.did).and(ty::Unevaluated {
+                    def: unevaluated.def,
+                    substs: InternalSubsts::identity_for_item(tcx, unevaluated.def.did),
+                    promoted: unevaluated.promoted,
+                })
+            } else {
+                param_env_and
+            };
+
+            // FIXME(eddyb) maybe the `const_eval_*` methods should take
+            // `ty::ParamEnvAnd` instead of having them separate.
+            let (param_env, unevaluated) = param_env_and.into_parts();
+            // try to resolve e.g. associated constants to their definition on an impl, and then
+            // evaluate the const.
+            match tcx.const_eval_resolve_for_typeck(param_env, unevaluated, None) {
+                // NOTE(eddyb) `val` contains no lifetimes/types/consts,
+                // and we use the original type, so nothing from `substs`
+                // (which may be identity substs, see above),
+                // can leak through `val` into the const we return.
+                Ok(val) => Some(Ok(val?)),
                 Err(ErrorHandled::TooGeneric | ErrorHandled::Linted) => None,
                 Err(ErrorHandled::Reported(e)) => Some(Err(e)),
             }

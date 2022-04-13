@@ -2921,10 +2921,10 @@ impl<'tcx> ConstantKind<'tcx> {
         }
     }
 
-    pub fn try_val(&self) -> Option<ConstValue<'tcx>> {
+    pub fn try_val(&self, tcx: TyCtxt<'tcx>) -> Option<ConstValue<'tcx>> {
         match self {
             ConstantKind::Ty(c) => match c.val() {
-                ty::ConstKind::Value(v) => Some(v),
+                ty::ConstKind::Value(v) => Some(tcx.valtree_to_const_val((c.ty(), v))),
                 _ => None,
             },
             ConstantKind::Val(v, _) => Some(*v),
@@ -2934,7 +2934,7 @@ impl<'tcx> ConstantKind<'tcx> {
     #[inline]
     pub fn try_to_value(self) -> Option<interpret::ConstValue<'tcx>> {
         match self {
-            ConstantKind::Ty(c) => c.val().try_to_value(),
+            ConstantKind::Ty(c) => bug!("should not encounter a ValTree here"),
             ConstantKind::Val(val, _) => Some(val),
         }
     }
@@ -2965,7 +2965,7 @@ impl<'tcx> ConstantKind<'tcx> {
             Self::Ty(c) => {
                 // FIXME Need to use a different evaluation function that directly returns a `ConstValue`
                 // if evaluation succeeds and does not create a ValTree first
-                if let Some(val) = c.val().try_eval(tcx, param_env) {
+                if let Some(val) = c.val().try_eval_for_mir(tcx, param_env) {
                     match val {
                         Ok(val) => Self::Val(val, c.ty()),
                         Err(_) => Self::Ty(tcx.const_error(self.ty())),
@@ -3048,6 +3048,11 @@ impl<'tcx> ConstantKind<'tcx> {
     pub fn from_usize(tcx: TyCtxt<'tcx>, n: u64) -> Self {
         let ty = tcx.types.usize;
         Self::from_bits(tcx, n as u128, ty::ParamEnv::empty().and(ty))
+    }
+
+    pub fn from_scalar(tcx: TyCtxt<'tcx>, s: Scalar, ty: Ty<'tcx>) -> Self {
+        let val = ConstValue::Scalar(s);
+        Self::Val(val, ty)
     }
 
     /// Literals are converted to `ConstantKindVal`, const generic parameters are eagerly

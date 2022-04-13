@@ -981,7 +981,7 @@ impl<'tcx> CommonConsts<'tcx> {
 
         CommonConsts {
             unit: mk_const(ty::ConstS {
-                val: ty::ConstKind::Value(ConstValue::Scalar(Scalar::ZST)),
+                val: ty::ConstKind::Value(ty::ValTree::zst()),
                 ty: types.unit,
             }),
         }

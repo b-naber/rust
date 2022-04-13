@@ -193,7 +193,7 @@ impl<'tcx> Const<'tcx> {
 
     /// Interns the given value as a constant.
     #[inline]
-    pub fn from_value(tcx: TyCtxt<'tcx>, val: ConstValue<'tcx>, ty: Ty<'tcx>) -> Self {
+    pub fn from_value(tcx: TyCtxt<'tcx>, val: ty::ValTree<'tcx>, ty: Ty<'tcx>) -> Self {
         tcx.mk_const(ConstS { val: ConstKind::Value(val), ty })
     }
 
@@ -261,7 +261,7 @@ impl<'tcx> Const<'tcx> {
     /// Tries to evaluate the constant if it is `Unevaluated`. If that doesn't succeed, return the
     /// unevaluated constant.
     pub fn eval(self, tcx: TyCtxt<'tcx>, param_env: ParamEnv<'tcx>) -> Const<'tcx> {
-        if let Some(val) = self.val().try_eval(tcx, param_env) {
+        if let Some(val) = self.val().try_eval_for_typeck(tcx, param_env) {
             match val {
                 Ok(val) => Const::from_value(tcx, val, self.ty()),
                 Err(ErrorGuaranteed { .. }) => tcx.const_error(self.ty()),
