@@ -59,45 +59,6 @@ pub(crate) fn eval_to_valtree(
     const_to_valtree_inner(&ecx, &place)
 }
 
-/// This function should never fail for validated constants. However, it is also invoked from the
-/// pretty printer which might attempt to format invalid constants and in that case it might fail.
-pub(crate) fn try_destructure_const<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
-    val: ty::Const<'tcx>,
-) -> InterpResult<'tcx, mir::DestructuredConst<'tcx>> {
-    trace!("destructure_const: {:?}", val);
-    let ecx = mk_eval_cx(tcx, DUMMY_SP, param_env, false);
-    let op = ecx.const_to_op(val, None)?;
-
-    // We go to `usize` as we cannot allocate anything bigger anyway.
-    let (field_count, variant, down) = match val.ty().kind() {
-        ty::Array(_, len) => (usize::try_from(len.eval_usize(tcx, param_env)).unwrap(), None, op),
-        // Checks if we have any variants, to avoid downcasting to a non-existing variant (when
-        // there are no variants `read_discriminant` successfully returns a non-existing variant
-        // index).
-        ty::Adt(def, _) if def.variants().is_empty() => throw_ub!(Unreachable),
-        ty::Adt(def, _) => {
-            let variant = ecx.read_discriminant(&op)?.1;
-            let down = ecx.operand_downcast(&op, variant)?;
-            (def.variant(variant).fields.len(), Some(variant), down)
-        }
-        ty::Tuple(substs) => (substs.len(), None, op),
-        _ => bug!("cannot destructure constant {:?}", val),
-    };
-
-    let fields = (0..field_count)
-        .map(|i| {
-            let field_op = ecx.operand_field(&down, i)?;
-            let val = op_to_const(&ecx, &field_op);
-            Ok(ty::Const::from_value(tcx, val, field_op.layout.ty))
-        })
-        .collect::<InterpResult<'tcx, Vec<_>>>()?;
-    let fields = tcx.arena.alloc_from_iter(fields);
-
-    Ok(mir::DestructuredConst { variant, fields })
-}
-
 #[instrument(skip(tcx), level = "debug")]
 pub(crate) fn deref_const<'tcx>(
     tcx: TyCtxt<'tcx>,

@@ -934,17 +934,6 @@ rustc_queries! {
         desc { "convert ValTree to ConstValue" }
     }
 
-    /// Destructure a constant ADT or array into its variant index and its
-    /// field values or return `None` if constant is invalid.
-    ///
-    /// Use infallible `TyCtxt::destructure_const` when you know that constant is valid.
-    query try_destructure_const(
-        key: ty::ParamEnvAnd<'tcx, ty::Const<'tcx>>
-    ) -> Option<mir::DestructuredConst<'tcx>> {
-        desc { "destructure constant" }
-        remap_env_constness
-    }
-
     /// Dereference a constant reference or raw pointer and turn the result into a constant
     /// again.
     query deref_const(
