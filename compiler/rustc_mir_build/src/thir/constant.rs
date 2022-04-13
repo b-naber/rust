@@ -8,7 +8,6 @@ use rustc_middle::ty::{self, ParamEnv, TyCtxt};
 use rustc_span::symbol::Symbol;
 use rustc_target::abi::Size;
 
-// FIXME Once valtrees are available, get rid of this function and the query
 crate fn lit_to_const<'tcx>(
     tcx: TyCtxt<'tcx>,
     lit_input: LitToConstInput<'tcx>,
@@ -21,42 +20,50 @@ crate fn lit_to_const<'tcx>(
         trace!("trunc {} with size {} and shift {}", n, width.bits(), 128 - width.bits());
         let result = width.truncate(n);
         trace!("trunc result: {}", result);
-        Ok(ConstValue::Scalar(Scalar::from_uint(result, width)))
+
+        Ok(ScalarInt::from_uint(result, width))
     };
 
-    let lit = match (lit, &ty.kind()) {
+    let valtree = match (lit, &ty.kind()) {
         (ast::LitKind::Str(s, _), ty::Ref(_, inner_ty, _)) if inner_ty.is_str() => {
-            let s = s.as_str();
-            let allocation = Allocation::from_bytes_byte_aligned_immutable(s.as_bytes());
-            let allocation = tcx.intern_const_alloc(allocation);
-            ConstValue::Slice { data: allocation, start: 0, end: s.len() }
+            let str_bytes = s.as_str().as_bytes();
+            ty::ValTree::from_raw_bytes(tcx, str_bytes)
         }
         (ast::LitKind::ByteStr(data), ty::Ref(_, inner_ty, _))
             if matches!(inner_ty.kind(), ty::Slice(_)) =>
         {
-            let allocation = Allocation::from_bytes_byte_aligned_immutable(data as &[u8]);
-            let allocation = tcx.intern_const_alloc(allocation);
-            ConstValue::Slice { data: allocation, start: 0, end: data.len() }
+            let bytes = data as &[u8];
+            ty::ValTree::from_raw_bytes(tcx, bytes)
         }
         (ast::LitKind::ByteStr(data), ty::Ref(_, inner_ty, _)) if inner_ty.is_array() => {
-            let id = tcx.allocate_bytes(data);
-            ConstValue::Scalar(Scalar::from_pointer(id.into(), &tcx))
+            let bytes = data as &[u8];
+            ty::ValTree::from_raw_bytes(tcx, bytes)
         }
         (ast::LitKind::Byte(n), ty::Uint(ty::UintTy::U8)) => {
-            ConstValue::Scalar(Scalar::from_uint(*n, Size::from_bytes(1)))
+            let scalar_int = ScalarInt::from_u8(*n);
+            ty::ValTree::from_scalar_int(scalar_int)
         }
         (ast::LitKind::Int(n, _), ty::Uint(_)) | (ast::LitKind::Int(n, _), ty::Int(_)) => {
-            trunc(if neg { (*n as i128).overflowing_neg().0 as u128 } else { *n })?
+            let scalar_int =
+                trunc(if neg { (*n as i128).overflowing_neg().0 as u128 } else { *n })?;
+            ty::ValTree::from_scalar_int(scalar_int)
         }
         (ast::LitKind::Float(n, _), ty::Float(fty)) => {
             parse_float_into_valtree(*n, *fty, neg).ok_or(LitToConstError::Reported)?
         }
-        (ast::LitKind::Bool(b), ty::Bool) => ConstValue::Scalar(Scalar::from_bool(*b)),
-        (ast::LitKind::Char(c), ty::Char) => ConstValue::Scalar(Scalar::from_char(*c)),
+        (ast::LitKind::Bool(b), ty::Bool) => {
+            let scalar_int = ScalarInt::from_bool(*b);
+            ty::ValTree::from_scalar_int(scalar_int)
+        }
+        (ast::LitKind::Char(c), ty::Char) => {
+            let scalar_int = ScalarInt::from_char(*c);
+            ty::ValTree::from_scalar_int(scalar_int)
+        }
         (ast::LitKind::Err(_), _) => return Err(LitToConstError::Reported),
         _ => return Err(LitToConstError::TypeError),
     };
-    Ok(ty::Const::from_value(tcx, lit, ty))
+
+    Ok(ty::Const::from_value(tcx, valtree, ty))
 }
 
 pub(crate) fn parse_float_into_scalar(

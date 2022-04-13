@@ -50,4 +50,15 @@ impl<'tcx> ValTree<'tcx> {
             _ => bug!("expected branch, got {:?}", self),
         }
     }
+
+    pub fn from_raw_bytes<'a>(tcx: TyCtxt<'tcx>, bytes: &'a [u8]) -> Self {
+        let branches = bytes.iter().map(|b| Self::Leaf(ScalarInt::from_u8(b)));
+        let interned = tcx.alloc_from_iter(branches.iter());
+
+        Self::Branch(interned)
+    }
+
+    pub fn from_scalar_int(i: ScalarInt) -> Self {
+        Self::Leaf(i)
+    }
 }
