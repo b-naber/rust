@@ -2891,20 +2891,6 @@ impl<'tcx> Constant<'tcx> {
     }
 }
 
-impl<'tcx> From<ty::Const<'tcx>> for ConstantKind<'tcx> {
-    #[inline]
-    fn from(ct: ty::Const<'tcx>) -> Self {
-        match ct.val() {
-            ty::ConstKind::Value(cv) => {
-                // FIXME Once valtrees are introduced we need to convert those
-                // into `ConstValue` instances here
-                Self::Val(cv, ct.ty())
-            }
-            _ => Self::Ty(ct),
-        }
-    }
-}
-
 impl<'tcx> ConstantKind<'tcx> {
     /// Returns `None` if the constant is not trivially safe for use in the type system.
     pub fn const_for_ty(&self) -> Option<ty::Const<'tcx>> {
