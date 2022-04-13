@@ -1,7 +1,7 @@
 //! See docs in build/expr/mod.rs
 
 use crate::build::Builder;
-use crate::thir::constant::parse_float;
+use crate::thir::constant::parse_float_into_scalar;
 use rustc_ast as ast;
 use rustc_hir::def_id::DefId;
 use rustc_middle::mir::interpret::Allocation;
@@ -89,6 +89,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
     }
 }
 
+fn parse_float_into_constval(
+    num: Symbol,
+    float_ty: ty::FloatTy,
+    neg: bool,
+) -> Option<ConstValue<'tcx>> {
+    parse_float_into_scalar(num, float_ty, neg).map(ConstValue::Scalar)
+}
+
 #[instrument(skip(tcx, lit_input))]
 fn lit_to_mir_constant<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -129,7 +137,7 @@ fn lit_to_mir_constant<'tcx>(
             trunc(if neg { (*n as i128).overflowing_neg().0 as u128 } else { *n })?
         }
         (ast::LitKind::Float(n, _), ty::Float(fty)) => {
-            parse_float(*n, *fty, neg).ok_or(LitToConstError::Reported)?
+            parse_float_into_constval(*n, *fty, neg).ok_or(LitToConstError::Reported)?
         }
         (ast::LitKind::Bool(b), ty::Bool) => ConstValue::Scalar(Scalar::from_bool(*b)),
         (ast::LitKind::Char(c), ty::Char) => ConstValue::Scalar(Scalar::from_char(*c)),
