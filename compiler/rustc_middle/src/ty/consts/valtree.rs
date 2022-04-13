@@ -1,4 +1,6 @@
 use super::ScalarInt;
+use crate::mir::interpret::{AllocId, Scalar};
+use crate::ty::TyCtxt;
 use rustc_macros::{HashStable, TyDecodable, TyEncodable};
 
 #[derive(Copy, Clone, Debug, Hash, TyEncodable, TyDecodable, Eq, PartialEq, Ord, PartialOrd)]
@@ -52,13 +54,28 @@ impl<'tcx> ValTree<'tcx> {
     }
 
     pub fn from_raw_bytes<'a>(tcx: TyCtxt<'tcx>, bytes: &'a [u8]) -> Self {
-        let branches = bytes.iter().map(|b| Self::Leaf(ScalarInt::from_u8(b)));
-        let interned = tcx.alloc_from_iter(branches.iter());
+        let branches = bytes.iter().map(|b| Self::Leaf(ScalarInt::from(*b)));
+        let interned = tcx.arena.alloc_from_iter(branches);
 
         Self::Branch(interned)
     }
 
     pub fn from_scalar_int(i: ScalarInt) -> Self {
         Self::Leaf(i)
+    }
+
+    pub fn try_to_scalar(self) -> Option<Scalar<AllocId>> {
+        self.try_to_scalar_int().map(Scalar::Int)
+    }
+
+    pub fn try_to_scalar_int(self) -> Option<ScalarInt> {
+        match self {
+            Self::Leaf(s) => Some(s),
+            Self::Branch(_) => None,
+        }
+    }
+
+    pub fn try_to_machine_usize(self, tcx: TyCtxt<'tcx>) -> Option<u64> {
+        self.try_to_scalar_int().map(|s| s.try_to_machine_usize(tcx).ok()).flatten()
     }
 }

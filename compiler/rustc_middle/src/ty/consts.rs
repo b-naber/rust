@@ -197,10 +197,9 @@ impl<'tcx> Const<'tcx> {
         tcx.mk_const(ConstS { val: ConstKind::Value(val), ty })
     }
 
-    #[inline]
-    /// Interns the given scalar as a constant.
-    pub fn from_scalar(tcx: TyCtxt<'tcx>, val: Scalar, ty: Ty<'tcx>) -> Self {
-        Self::from_value(tcx, ConstValue::Scalar(val), ty)
+    pub fn from_scalar_int(tcx: TyCtxt<'tcx>, i: ScalarInt, ty: Ty<'tcx>) -> Self {
+        let valtree = ty::ValTree::from_scalar_int(i);
+        Self::from_value(tcx, valtree, ty)
     }
 
     #[inline]
@@ -210,13 +209,14 @@ impl<'tcx> Const<'tcx> {
             .layout_of(ty)
             .unwrap_or_else(|e| panic!("could not compute layout for {:?}: {:?}", ty, e))
             .size;
-        Self::from_scalar(tcx, Scalar::from_uint(bits, size), ty.value)
+        Self::from_scalar_int(tcx, ScalarInt::try_from_uint(bits, size).unwrap(), ty.value)
     }
 
     #[inline]
     /// Creates an interned zst constant.
     pub fn zero_sized(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> Self {
-        Self::from_scalar(tcx, Scalar::ZST, ty)
+        let valtree = ty::ValTree::zst();
+        Self::from_value(tcx, valtree, ty)
     }
 
     #[inline]

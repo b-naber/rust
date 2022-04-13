@@ -75,7 +75,7 @@ static_assert_size!(ConstKind<'_>, 40);
 
 impl<'tcx> ConstKind<'tcx> {
     #[inline]
-    pub fn try_to_value(self) -> Option<ConstValue<'tcx>> {
+    pub fn try_to_value(self) -> Option<ty::ValTree<'tcx>> {
         if let ConstKind::Value(val) = self { Some(val) } else { None }
     }
 
@@ -86,7 +86,7 @@ impl<'tcx> ConstKind<'tcx> {
 
     #[inline]
     pub fn try_to_scalar_int(self) -> Option<ScalarInt> {
-        Some(self.try_to_value()?.try_to_scalar()?.assert_int())
+        self.try_to_value()?.try_to_scalar_int()
     }
 
     #[inline]
