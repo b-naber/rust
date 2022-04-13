@@ -1227,7 +1227,7 @@ pub trait PrettyPrinter<'tcx>:
             }
             ty::ConstKind::Param(ParamConst { name, .. }) => p!(write("{}", name)),
             ty::ConstKind::Value(value) => {
-                return self.pretty_print_const_value(value, ct.ty(), print_ty);
+                return self.pretty_print_const_valtree(value, ct.ty(), print_ty);
             }
 
             ty::ConstKind::Bound(debruijn, bound_var) => {
@@ -1263,33 +1263,8 @@ pub trait PrettyPrinter<'tcx>:
         match ty.kind() {
             // Byte strings (&[u8; N])
             ty::Ref(_, inner, _) => {
-                if let ty::Array(elem, len) = inner.kind() {
-                    if let ty::Uint(ty::UintTy::U8) = elem.kind() {
-                        if let ty::ConstKind::Value(ConstValue::Scalar(int)) = len.val() {
-                            match self.tcx().get_global_alloc(alloc_id) {
-                                Some(GlobalAlloc::Memory(alloc)) => {
-                                    let len = int.assert_bits(self.tcx().data_layout.pointer_size);
-                                    let range =
-                                        AllocRange { start: offset, size: Size::from_bytes(len) };
-                                    if let Ok(byte_str) =
-                                        alloc.inner().get_bytes(&self.tcx(), range)
-                                    {
-                                        p!(pretty_print_byte_str(byte_str))
-                                    } else {
-                                        p!("<too short allocation>")
-                                    }
-                                }
-                                // FIXME: for statics and functions, we could in principle print more detail.
-                                Some(GlobalAlloc::Static(def_id)) => {
-                                    p!(write("<static({:?})>", def_id))
-                                }
-                                Some(GlobalAlloc::Function(_)) => p!("<function>"),
-                                None => p!("<dangling pointer>"),
-                            }
-                            return Ok(self);
-                        }
-                    }
-                }
+                // FIXME Need to include valtrees here!
+                return Ok(self);
             }
             ty::FnPtr(_) => {
                 // FIXME: We should probably have a helper method to share code with the "Byte strings"
@@ -1418,14 +1393,11 @@ pub trait PrettyPrinter<'tcx>:
         print_ty: bool,
     ) -> Result<Self::Const, Self::Error> {
         define_scoped_cx!(self);
-
         if self.tcx().sess.verbose() {
             p!(write("ConstValue({:?}: ", ct), print(ty), ")");
             return Ok(self);
         }
-
         let u8_type = self.tcx().types.u8;
-
         match (ct, ty.kind()) {
             // Byte/string slices, printed as (byte) string literals.
             (ConstValue::Slice { data, start, end }, ty::Ref(_, inner, _)) => {
@@ -1458,13 +1430,11 @@ pub trait PrettyPrinter<'tcx>:
                 let n = n.val().try_to_bits(self.tcx().data_layout.pointer_size).unwrap();
                 // cast is ok because we already checked for pointer size (32 or 64 bit) above
                 let range = AllocRange { start: offset, size: Size::from_bytes(n) };
-
                 let byte_str = alloc.inner().get_bytes(&self.tcx(), range).unwrap();
                 p!("*");
                 p!(pretty_print_byte_str(byte_str));
                 return Ok(self);
             }
-
             // Aggregates, printed as array/tuple/struct/variant construction syntax.
             //
             // NB: the `has_param_types_or_consts` check ensures that we can use
@@ -1476,86 +1446,32 @@ pub trait PrettyPrinter<'tcx>:
             // FIXME(eddyb) for `--emit=mir`/`-Z dump-mir`, we should provide the
             // correct `ty::ParamEnv` to allow printing *all* constant values.
             (_, ty::Array(..) | ty::Tuple(..) | ty::Adt(..)) if !ty.has_param_types_or_consts() => {
-                let Some(contents) = self.tcx().try_destructure_const(
-                    ty::ParamEnv::reveal_all()
-                        .and(self.tcx().mk_const(ty::ConstS { val: ty::ConstKind::Value(ct), ty })),
-                ) else {
-                    // Fall back to debug pretty printing for invalid constants.
-                    p!(write("{:?}", ct));
-                    if print_ty {
-                        p!(": ", print(ty));
-                    }
-                    return Ok(self);
-                };
-
-                let fields = contents.fields.iter().copied();
-
-                match *ty.kind() {
-                    ty::Array(..) => {
-                        p!("[", comma_sep(fields), "]");
-                    }
-                    ty::Tuple(..) => {
-                        p!("(", comma_sep(fields));
-                        if contents.fields.len() == 1 {
-                            p!(",");
-                        }
-                        p!(")");
-                    }
-                    ty::Adt(def, _) if def.variants().is_empty() => {
-                        self = self.typed_value(
-                            |mut this| {
-                                write!(this, "unreachable()")?;
-                                Ok(this)
-                            },
-                            |this| this.print_type(ty),
-                            ": ",
-                        )?;
-                    }
-                    ty::Adt(def, substs) => {
-                        let variant_idx =
-                            contents.variant.expect("destructed const of adt without variant idx");
-                        let variant_def = &def.variant(variant_idx);
-                        p!(print_value_path(variant_def.def_id, substs));
-
-                        match variant_def.ctor_kind {
-                            CtorKind::Const => {}
-                            CtorKind::Fn => {
-                                p!("(", comma_sep(fields), ")");
-                            }
-                            CtorKind::Fictive => {
-                                p!(" {{ ");
-                                let mut first = true;
-                                for (field_def, field) in iter::zip(&variant_def.fields, fields) {
-                                    if !first {
-                                        p!(", ");
-                                    }
-                                    p!(write("{}: ", field_def.name), print(field));
-                                    first = false;
-                                }
-                                p!(" }}");
-                            }
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-
+                // FIXME Need to use try_destructure_mir_const here!
                 return Ok(self);
             }
-
             (ConstValue::Scalar(scalar), _) => {
                 return self.pretty_print_const_scalar(scalar, ty, print_ty);
             }
-
             // FIXME(oli-obk): also pretty print arrays and other aggregate constants by reading
             // their fields instead of just dumping the memory.
             _ => {}
         }
-
         // fallback
         p!(write("{:?}", ct));
         if print_ty {
             p!(": ", print(ty));
         }
+        Ok(self)
+    }
+
+    fn pretty_print_const_valtree(
+        mut self,
+        ct: ty::ValTree<'tcx>,
+        ty: Ty<'tcx>,
+        print_ty: bool,
+    ) -> Result<Self::Const, Self::Error> {
+        // Just a dummy function right now
+
         Ok(self)
     }
 }
