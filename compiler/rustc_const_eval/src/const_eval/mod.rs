@@ -59,6 +59,61 @@ pub(crate) fn eval_to_valtree(
     const_to_valtree_inner(&ecx, &place)
 }
 
+/// Tries to destructure constants of type Array or Adt into the constants
+/// of its fields.
+pub(crate) fn try_destructure_const(
+    tcx: TyCtxt<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
+    _const: ty::Const<'tcx>,
+) -> Option<mir::DestructuredConst<'tcx>> {
+    if let ty::ConstKind::Value(valtree) = _const.val() {
+        let branches = _const.val().unwrap_branch();
+
+        let (fields, variant) = match _const.ty().kind() {
+            ty::Array(inner_ty, _) => {
+                // construct the consts for the elements of the array
+                let field_consts = branches
+                    .iter()
+                    .map(|b| tcx.mk_const(ConstS { val: ConstKind::Value(b), ty: *inner_ty }))
+                    .collect::<Vec<_>>();
+                debug!(?field_consts);
+
+                (field_consts, None)
+            }
+            ty::Adt(def, _) if def.variants().is_empty() => throw_ub!(Unreachable),
+            ty::Adt(def, substs) if def.is_enum() => {
+                let variant_idx = if def.is_enum() {
+                    VariantIdx::from_u32(branches[0].unwrap_leaf().try_to_u32().unwrap())
+                } else {
+                    VariantIdx::from_u32(0)
+                };
+                let fields = def.variant(variant_idx).fields();
+                let mut field_consts = vec![];
+
+                // Note: First element in ValTree corresponds to variant of enum
+                let mut valtree_idx = if def.is_enum() { 1 } else { 0 };
+                for field in fields {
+                    let field_ty = field.ty(tcx, substs);
+                    let field_valtree = branches[valtree_idx]; // first element of branches is variant
+                    let field_const = tcx.mk_const(ConstS { val: field_valtree, ty: field_ty });
+                    field_consts.push(field_const);
+                    valtree_idx += 1;
+                }
+                debug!(?field_consts);
+
+                (field_consts, Some(variant_idx))
+            }
+            _ => bug!("cannot destructure constant {:?}", val),
+        };
+
+        let fields = tcx.arena.alloc_from_iter(fields.iter());
+
+        Some(mir::DestructuredConst { variant, fields })
+    } else {
+        None
+    }
+}
+
 #[instrument(skip(tcx), level = "debug")]
 pub(crate) fn deref_const<'tcx>(
     tcx: TyCtxt<'tcx>,

@@ -934,6 +934,10 @@ rustc_queries! {
         desc { "convert ValTree to ConstValue" }
     }
 
+    query try_destructure_const(key: ty::ParamEnvAnd<'tcx, ty::Const<'tcx>>) -> Option<mir::DestructuredConst<'tcx>> {
+        desc { "destructure type level constant"}
+    }
+
     /// Dereference a constant reference or raw pointer and turn the result into a constant
     /// again.
     query deref_const(
