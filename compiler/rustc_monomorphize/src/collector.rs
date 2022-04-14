@@ -735,7 +735,9 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
         let val = match literal {
             mir::ConstantKind::Val(val, _) => val,
             mir::ConstantKind::Ty(ct) => match ct.val() {
-                ty::ConstKind::Value(val) => val,
+                ty::ConstKind::Value(val) => {
+                    bug!("should not be encountering a type-level constant value here")
+                }
                 ty::ConstKind::Unevaluated(ct) => {
                     let param_env = ty::ParamEnv::reveal_all();
                     match self.tcx.const_eval_resolve(param_env, ct, None) {
@@ -763,7 +765,9 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
         let param_env = ty::ParamEnv::reveal_all();
 
         match substituted_constant.val() {
-            ty::ConstKind::Value(val) => collect_const_value(self.tcx, val, self.output),
+            ty::ConstKind::Value(val) => {
+                bug!("should not be encountering type-level constant value here")
+            }
             ty::ConstKind::Unevaluated(unevaluated) => {
                 match self.tcx.const_eval_resolve(param_env, unevaluated, None) {
                     // The `monomorphize` call should have evaluated that constant already.

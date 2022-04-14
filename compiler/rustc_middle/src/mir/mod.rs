@@ -3008,6 +3008,10 @@ impl<'tcx> ConstantKind<'tcx> {
         }
     }
 
+    pub fn from_value(val: ConstValue<'tcx>, ty: Ty<'tcx>) -> Self {
+        Self::Val(val, ty)
+    }
+
     pub fn from_bits(
         tcx: TyCtxt<'tcx>,
         bits: u128,
