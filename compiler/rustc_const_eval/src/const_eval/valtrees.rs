@@ -14,8 +14,6 @@ use rustc_target::abi::VariantIdx;
 use crate::interpret::visitor::Value;
 use crate::interpret::MPlaceTy;
 
-pub fn raw_bytes_to_valtree()
-
 #[instrument(skip(ecx), level = "debug")]
 fn branches<'tcx>(
     ecx: &CompileTimeEvalContext<'tcx, 'tcx>,

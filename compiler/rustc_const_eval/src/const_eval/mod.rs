@@ -4,15 +4,16 @@ use std::convert::TryFrom;
 
 use rustc_errors::ErrorGuaranteed;
 use rustc_hir::Mutability;
-use rustc_middle::mir::{self, interpret::ErrorHandled};
+use rustc_middle::mir;
+use rustc_middle::mir::interpret::{ErrorHandled, EvalToValTreeResult};
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_span::{source_map::DUMMY_SP, symbol::Symbol};
+use rustc_target::abi::VariantIdx;
 
 use crate::interpret::{
     intern_const_alloc_recursive, ConstValue, InternKind, InterpCx, InterpResult, MemPlaceMeta,
     Scalar,
 };
-use valtrees::const_to_valtree_inner;
 
 mod error;
 mod eval_queries;
@@ -24,7 +25,7 @@ pub use error::*;
 pub use eval_queries::*;
 pub use fn_queries::*;
 pub use machine::*;
-pub(crate) use valtrees::{const_to_valtree, valtree_to_const_value};
+pub(crate) use valtrees::{const_to_valtree_inner, valtree_to_const_value};
 
 pub(crate) fn const_caller_location(
     tcx: TyCtxt<'_>,
@@ -45,19 +46,19 @@ pub(crate) fn const_caller_location(
 pub(crate) fn eval_to_valtree(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
-    cid: GlobalId<'tcx>,
+    cid: mir::GlobalId<'tcx>,
 ) -> EvalToValTreeResult<'tcx> {
-    let const_alloc = tcx.eval_to_allocation_raw(param_env.and(gid))?;
+    let const_alloc = tcx.eval_to_allocation_raw(param_env.and(cid))?;
     let ecx = mk_eval_cx(
         tcx, DUMMY_SP, param_env,
         // It is absolutely crucial for soundness that
         // we do not read from static items or other mutable memory.
         false,
     );
-    let place = ecx.raw_const_to_mplace(raw).unwrap();
+    let place = ecx.raw_const_to_mplace(const_alloc).unwrap();
     debug!(?place);
 
-    const_to_valtree_inner(&ecx, &place)
+    Ok(const_to_valtree_inner(&ecx, &place))
 }
 
 /// Tries to destructure constants of type Array or Adt into the constants
@@ -75,7 +76,9 @@ pub(crate) fn try_destructure_const(
                 // construct the consts for the elements of the array
                 let field_consts = branches
                     .iter()
-                    .map(|b| tcx.mk_const(ConstS { val: ConstKind::Value(b), ty: *inner_ty }))
+                    .map(|b| {
+                        tcx.mk_const(ty::ConstS { val: ty::ConstKind::Value(b), ty: *inner_ty })
+                    })
                     .collect::<Vec<_>>();
                 debug!(?field_consts);
 
@@ -96,7 +99,7 @@ pub(crate) fn try_destructure_const(
                 for field in fields {
                     let field_ty = field.ty(tcx, substs);
                     let field_valtree = branches[valtree_idx]; // first element of branches is variant
-                    let field_const = tcx.mk_const(ConstS { val: field_valtree, ty: field_ty });
+                    let field_const = tcx.mk_const(ty::ConstS { val: field_valtree, ty: field_ty });
                     field_consts.push(field_const);
                     valtree_idx += 1;
                 }
@@ -104,7 +107,7 @@ pub(crate) fn try_destructure_const(
 
                 (field_consts, Some(variant_idx))
             }
-            _ => bug!("cannot destructure constant {:?}", val),
+            _ => bug!("cannot destructure constant {:?}", _const.val()),
         };
 
         let fields = tcx.arena.alloc_from_iter(fields.iter());
@@ -113,40 +116,6 @@ pub(crate) fn try_destructure_const(
     } else {
         None
     }
-}
-
-pub(crate) fn destructure_mir_constant<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
-    val: mir::ConstantKind<'tcx>,
-) -> mir::DestructuredMirConstant<'tcx> {
-    trace!("destructure_const: {:?}", val);
-    let ecx = mk_eval_cx(tcx, DUMMY_SP, param_env, false);
-    let op = ecx.mir_const_to_op(&val, None).unwrap();
-
-    // We go to `usize` as we cannot allocate anything bigger anyway.
-    let (field_count, variant, down) = match val.ty().kind() {
-        ty::Array(_, len) => (usize::try_from(len.eval_usize(tcx, param_env)).unwrap(), None, op),
-        ty::Adt(def, _) if def.variants.is_empty() => {
-            return mir::DestructuredMirConstant { variant: None, fields: &[] };
-        }
-        ty::Adt(def, _) => {
-            let variant = ecx.read_discriminant(&op).unwrap().1;
-            let down = ecx.operand_downcast(&op, variant).unwrap();
-            (def.variants[variant].fields.len(), Some(variant), down)
-        }
-        ty::Tuple(substs) => (substs.len(), None, op),
-        _ => bug!("cannot destructure constant {:?}", val),
-    };
-
-    let fields_iter = (0..field_count).map(|i| {
-        let field_op = ecx.operand_field(&down, i).unwrap();
-        let val = op_to_const(&ecx, &field_op);
-        mir::ConstantKind::Val(val, field_op.layout.ty)
-    });
-    let fields = tcx.arena.alloc_from_iter(fields_iter);
-
-    mir::DestructuredMirConstant { variant, fields }
 }
 
 #[instrument(skip(tcx), level = "debug")]
