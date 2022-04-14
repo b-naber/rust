@@ -932,7 +932,7 @@ rustc_queries! {
     query eval_to_valtree(
         key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>
     ) -> EvalToValTreeResult<'tcx> {
-        desc { "destructure constant" }
+        desc { "evaluate type-level constant" }
         remap_env_constness
     }
 
@@ -960,7 +960,14 @@ rustc_queries! {
     }
 
     query try_destructure_const(key: ty::ParamEnvAnd<'tcx, ty::Const<'tcx>>) -> Option<mir::DestructuredConst<'tcx>> {
-        desc { "destructure type level constant"}
+        desc { "destructure type-level constant"}
+    }
+
+    /// Destructure an `mir::ConstantKind` ADT or array into its variant index
+    /// and its field values.
+    query destructure_mir_constant(key: ty::ParamEnvAnd<'tcx, mir::ConstantKind<'tcx>>) -> mir::DestructuredMirConstant<'tcx> {
+        desc { "destructure mir constant"}
+        remap_env_constness
     }
 
     /// Dereference a constant reference or raw pointer and turn the result into a constant
