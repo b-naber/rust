@@ -43,7 +43,7 @@ pub(crate) fn const_caller_location(
 
 /// Evaluates a constant and turns it into a type-level constant value.
 #[instrument(skip(tcx), level = "debug")]
-pub(crate) fn eval_to_valtree(
+pub(crate) fn eval_to_valtree<'tcx>(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     cid: GlobalId<'tcx>,
