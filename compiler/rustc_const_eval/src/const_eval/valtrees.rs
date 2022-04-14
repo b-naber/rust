@@ -27,8 +27,6 @@ use crate::interpret::visitor::Value;
 use crate::interpret::MPlaceTy;
 >>>>>>> 3ef9ce3e369 (implement valtree -> constvalue conversion)
 
-pub fn raw_bytes_to_valtree()
-
 #[instrument(skip(ecx), level = "debug")]
 fn branches<'tcx>(
     ecx: &CompileTimeEvalContext<'tcx, 'tcx>,
