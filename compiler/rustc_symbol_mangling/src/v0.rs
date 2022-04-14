@@ -629,14 +629,8 @@ impl<'tcx> Printer<'tcx> for &mut SymbolMangler<'tcx> {
             ty::Ref(_, ty, hir::Mutability::Not) if *ty == self.tcx.types.str_ => {
                 self.push("R");
                 match ct.val() {
-                    ty::ConstKind::Value(ConstValue::Slice { data, start, end }) => {
-                        // NOTE(eddyb) the following comment was kept from `ty::print::pretty`:
-                        // The `inspect` here is okay since we checked the bounds, and there are no
-                        // relocations (we have an active `str` reference here). We don't use this
-                        // result to affect interpreter execution.
-                        let slice = data
-                            .inner()
-                            .inspect_with_uninit_and_ptr_outside_interpreter(start..end);
+                    ty::ConstKind::Value(valtree) => {
+                        let slice = valtree.try_to_raw_bytes(self.tcx(), *ty).unwrap();
                         let s = std::str::from_utf8(slice).expect("non utf8 str from miri");
 
                         self.push("e");

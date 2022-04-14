@@ -413,23 +413,12 @@ impl<'a, 'tcx> AbstractConstBuilder<'a, 'tcx> {
         self.recurse_build(self.body_id)?;
 
         for n in self.nodes.iter() {
-<<<<<<< HEAD
             if let Node::Leaf(ct) = n {
                 if let ty::ConstKind::Unevaluated(ct) = ct.val() {
                     // `AbstractConst`s should not contain any promoteds as they require references which
                     // are not allowed.
                     assert_eq!(ct.promoted, None);
                 }
-=======
-            if let Node::Leaf(ty::Const(Interned(
-                ty::ConstS { val: ty::ConstKind::Unevaluated(ct), ty: _ },
-                _,
-            ))) = n
-            {
-                // `AbstractConst`s should not contain any promoteds as they require references which
-                // are not allowed.
-                assert_eq!(ct.promoted, None);
->>>>>>> ac60db231c9 (do use ty::Const in patterns and abstract consts)
             }
         }
 
@@ -460,9 +449,8 @@ impl<'a, 'tcx> AbstractConstBuilder<'a, 'tcx> {
                 self.nodes.push(Node::Leaf(constant))
             }
             &ExprKind::NonHirLiteral { lit , user_ty: _} => {
-                // FIXME Construct a Valtree from this ScalarInt when introducing Valtrees
-                let const_value = ConstValue::Scalar(Scalar::Int(lit));
-                self.nodes.push(Node::Leaf(ty::Const::from_value(self.tcx, const_value, node.ty)))
+                let val = ty::ValTree::from_scalar_int(lit);
+                self.nodes.push(Node::Leaf(ty::Const::from_value(self.tcx, val, node.ty)))
             }
             &ExprKind::NamedConst { def_id, substs, user_ty: _ } => {
                 let uneval = ty::Unevaluated::new(ty::WithOptConstParam::unknown(def_id), substs);

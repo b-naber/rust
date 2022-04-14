@@ -62,7 +62,7 @@ impl<'tcx> chalk_ir::interner::Interner for RustInterner<'tcx> {
     type InternedType = Box<chalk_ir::TyData<Self>>;
     type InternedLifetime = Box<chalk_ir::LifetimeData<Self>>;
     type InternedConst = Box<chalk_ir::ConstData<Self>>;
-    type InternedConcreteConst = ConstValue<'tcx>;
+    type InternedConcreteConst = ty::ValTree<'tcx>;
     type InternedGenericArg = Box<chalk_ir::GenericArgData<Self>>;
     type InternedGoal = Box<chalk_ir::GoalData<Self>>;
     type InternedGoals = Vec<chalk_ir::Goal<Self>>;

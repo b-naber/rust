@@ -264,10 +264,7 @@ impl<'tcx> Printer<'tcx> for &mut SymbolPrinter<'tcx> {
     fn print_const(self, ct: ty::Const<'tcx>) -> Result<Self::Const, Self::Error> {
         // only print integers
         match (ct.val(), ct.ty().kind()) {
-            (
-                ty::ConstKind::Value(ConstValue::Scalar(Scalar::Int(scalar))),
-                ty::Int(_) | ty::Uint(_),
-            ) => {
+            (ty::ConstKind::Value(ty::ValTree::Leaf(scalar)), ty::Int(_) | ty::Uint(_)) => {
                 // The `pretty_print_const` formatting depends on -Zverbose
                 // flag, so we cannot reuse it here.
                 let signed = matches!(ct.ty().kind(), ty::Int(_));

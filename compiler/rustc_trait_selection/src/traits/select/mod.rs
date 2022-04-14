@@ -630,13 +630,23 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
                     let evaluate = |c: ty::Const<'tcx>| {
                         if let ty::ConstKind::Unevaluated(unevaluated) = c.val() {
-                            self.infcx
-                                .const_eval_resolve(
-                                    obligation.param_env,
-                                    unevaluated,
-                                    Some(obligation.cause.span),
-                                )
-                                .map(|val| ty::Const::from_value(self.tcx(), val, c.ty()))
+                            match self.infcx.const_eval_resolve(
+                                obligation.param_env,
+                                unevaluated,
+                                Some(obligation.cause.span),
+                            ) {
+                                Ok(Some(valtree)) => {
+                                    Ok(ty::Const::from_value(self.tcx(), valtree, c.ty()))
+                                }
+                                Ok(None) => {
+                                    let tcx = self.tcx();
+                                    let def_id = unevaluated.def.did;
+                                    let reported = tcx.sess.struct_span_err(tcx.def_span(def_id), &format!("unable to construct a constant value for the unevaluated constant {:?}", unevaluated)).emit();
+
+                                    Err(ErrorHandled::Reported(reported))
+                                }
+                                Err(e) => Err(e),
+                            }
                         } else {
                             Ok(c)
                         }

@@ -1,4 +1,5 @@
 use crate::infer::{InferCtxt, TyOrConstInferVar};
+use crate::rustc_middle::dep_graph::DepContext;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::obligation_forest::ProcessResult;
 use rustc_data_structures::obligation_forest::{Error, ForestObligation, Outcome};
@@ -599,7 +600,16 @@ impl<'a, 'b, 'tcx> FulfillProcessor<'a, 'b, 'tcx> {
                                 unevaluated,
                                 Some(obligation.cause.span),
                             ) {
-                                Ok(val) => Ok(Const::from_value(self.selcx.tcx(), val, c.ty())),
+                                Ok(Some(val)) => {
+                                    Ok(Const::from_value(self.selcx.tcx(), val, c.ty()))
+                                }
+                                Ok(None) => {
+                                    let tcx = self.selcx.tcx();
+                                    let def_id = unevaluated.def.did;
+                                    let reported = tcx.sess().struct_span_err(tcx.def_span(def_id), &format!("unable to construct a constant value for the unevaluated constant {:?}", unevaluated)).emit();
+
+                                    Err(ErrorHandled::Reported(reported))
+                                }
                                 Err(ErrorHandled::TooGeneric) => {
                                     stalled_on.extend(
                                         unevaluated
