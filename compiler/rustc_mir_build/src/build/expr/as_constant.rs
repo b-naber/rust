@@ -89,7 +89,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
     }
 }
 
-fn parse_float_into_constval(
+fn parse_float_into_constval<'tcx>(
     num: Symbol,
     float_ty: ty::FloatTy,
     neg: bool,

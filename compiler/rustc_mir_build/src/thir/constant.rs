@@ -4,9 +4,9 @@ use rustc_ast as ast;
 use rustc_middle::mir::interpret::{
     Allocation, ConstValue, LitToConstError, LitToConstInput, Scalar,
 };
+use rustc_middle::ty::ScalarInt;
 use rustc_middle::ty::{self, ParamEnv, TyCtxt};
 use rustc_span::symbol::Symbol;
-use rustc_target::abi::Size;
 
 crate fn lit_to_const<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -72,7 +72,7 @@ pub(crate) fn parse_float_into_scalar(
     neg: bool,
 ) -> Option<Scalar> {
     let num = num.as_str();
-    match fty {
+    match float_ty {
         ty::FloatTy::F32 => {
             let Ok(rust_f) = num.parse::<f32>() else { return None };
             let mut f = num.parse::<Single>().unwrap_or_else(|e| {
