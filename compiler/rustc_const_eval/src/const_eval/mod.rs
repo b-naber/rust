@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use rustc_errors::ErrorGuaranteed;
 use rustc_hir::Mutability;
 use rustc_middle::mir;
-use rustc_middle::mir::interpret::{ErrorHandled, EvalToValTreeResult};
+use rustc_middle::mir::interpret::{ErrorHandled, EvalToValTreeResult, GlobalId};
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_span::{source_map::DUMMY_SP, symbol::Symbol};
 use rustc_target::abi::VariantIdx;
@@ -46,7 +46,7 @@ pub(crate) fn const_caller_location(
 pub(crate) fn eval_to_valtree(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
-    cid: mir::GlobalId<'tcx>,
+    cid: GlobalId<'tcx>,
 ) -> EvalToValTreeResult<'tcx> {
     let const_alloc = tcx.eval_to_allocation_raw(param_env.and(cid))?;
     let ecx = mk_eval_cx(
