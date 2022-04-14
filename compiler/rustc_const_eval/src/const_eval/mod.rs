@@ -63,7 +63,7 @@ pub(crate) fn eval_to_valtree(
 
 /// Tries to destructure constants of type Array or Adt into the constants
 /// of its fields.
-pub(crate) fn try_destructure_const(
+pub(crate) fn try_destructure_const<'tcx>(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     _const: ty::Const<'tcx>,
