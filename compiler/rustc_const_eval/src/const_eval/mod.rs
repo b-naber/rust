@@ -69,7 +69,7 @@ pub(crate) fn try_destructure_const<'tcx>(
     _const: ty::Const<'tcx>,
 ) -> Option<mir::DestructuredConst<'tcx>> {
     if let ty::ConstKind::Value(valtree) = _const.val() {
-        let branches = _const.val().unwrap_branch();
+        let branches = valtree.unwrap_branch();
 
         let (fields, variant) = match _const.ty().kind() {
             ty::Array(inner_ty, _) => {
@@ -84,14 +84,14 @@ pub(crate) fn try_destructure_const<'tcx>(
 
                 (field_consts, None)
             }
-            ty::Adt(def, _) if def.variants().is_empty() => throw_ub!(Unreachable),
+            ty::Adt(def, _) if def.variants.is_empty() => bug!("unreachable"),
             ty::Adt(def, substs) if def.is_enum() => {
                 let variant_idx = if def.is_enum() {
                     VariantIdx::from_u32(branches[0].unwrap_leaf().try_to_u32().unwrap())
                 } else {
                     VariantIdx::from_u32(0)
                 };
-                let fields = def.variant(variant_idx).fields();
+                let fields = def.variant(variant_idx).fields;
                 let mut field_consts = vec![];
 
                 // Note: First element in ValTree corresponds to variant of enum
