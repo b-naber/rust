@@ -56,7 +56,7 @@ fn slice_branches<'tcx>(
 }
 
 #[instrument(skip(ecx), level = "debug")]
-pub(super) fn const_to_valtree_inner<'tcx>(
+pub(crate) fn const_to_valtree_inner<'tcx>(
     ecx: &CompileTimeEvalContext<'tcx, 'tcx>,
     place: &MPlaceTy<'tcx>,
 ) -> Option<ty::ValTree<'tcx>> {
