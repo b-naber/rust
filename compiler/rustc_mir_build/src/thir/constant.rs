@@ -21,7 +21,8 @@ crate fn lit_to_const<'tcx>(
         let result = width.truncate(n);
         trace!("trunc result: {}", result);
 
-        Ok(ScalarInt::from_uint(result, width))
+        Ok(ScalarInt::try_from_uint(result, width)
+            .expect(&format!("expected to create ScalarInt from uint {:?}", result)))
     };
 
     let valtree = match (lit, &ty.kind()) {
@@ -40,8 +41,7 @@ crate fn lit_to_const<'tcx>(
             ty::ValTree::from_raw_bytes(tcx, bytes)
         }
         (ast::LitKind::Byte(n), ty::Uint(ty::UintTy::U8)) => {
-            let scalar_int = ScalarInt::from_u8(*n);
-            ty::ValTree::from_scalar_int(scalar_int)
+            ty::ValTree::from_scalar_int(*n.into())
         }
         (ast::LitKind::Int(n, _), ty::Uint(_)) | (ast::LitKind::Int(n, _), ty::Int(_)) => {
             let scalar_int =
@@ -51,14 +51,8 @@ crate fn lit_to_const<'tcx>(
         (ast::LitKind::Float(n, _), ty::Float(fty)) => {
             parse_float_into_valtree(*n, *fty, neg).ok_or(LitToConstError::Reported)?
         }
-        (ast::LitKind::Bool(b), ty::Bool) => {
-            let scalar_int = ScalarInt::from_bool(*b);
-            ty::ValTree::from_scalar_int(scalar_int)
-        }
-        (ast::LitKind::Char(c), ty::Char) => {
-            let scalar_int = ScalarInt::from_char(*c);
-            ty::ValTree::from_scalar_int(scalar_int)
-        }
+        (ast::LitKind::Bool(b), ty::Bool) => ty::ValTree::from_scalar_int(*b.into()),
+        (ast::LitKind::Char(c), ty::Char) => ty::ValTree::from_scalar_int(*c.into()),
         (ast::LitKind::Err(_), _) => return Err(LitToConstError::Reported),
         _ => return Err(LitToConstError::TypeError),
     };

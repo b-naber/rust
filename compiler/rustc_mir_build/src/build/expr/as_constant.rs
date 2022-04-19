@@ -10,6 +10,7 @@ use rustc_middle::mir::*;
 use rustc_middle::thir::*;
 use rustc_middle::ty::subst::SubstsRef;
 use rustc_middle::ty::{self, CanonicalUserTypeAnnotation, Ty, TyCtxt};
+use rustc_span::Symbol;
 use rustc_target::abi::Size;
 
 impl<'a, 'tcx> Builder<'a, 'tcx> {

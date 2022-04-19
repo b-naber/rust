@@ -141,21 +141,14 @@ impl IntRange {
         let ty = value.ty();
         if let Some((target_size, bias)) = Self::integral_size_and_signed_bias(tcx, ty) {
             let val = (|| {
-                if let ty::ConstKind::Value(ConstValue::Scalar(scalar)) = value.val() {
+                if let ty::ConstKind::Value(ty::ValTree::Leaf(scalar)) = value {
                     // For this specific pattern we can skip a lot of effort and go
                     // straight to the result, after doing a bit of checking. (We
                     // could remove this branch and just fall through, which
                     // is more general but much slower.)
-                    if let Ok(bits) = scalar.to_bits_or_ptr_internal(target_size).unwrap() {
+                    if let Ok(bits) = scalar.to_bits(target_size) {
                         return Some(bits);
                     }
-                    mir::ConstantKind::Ty(c) => match c.val() {
-                        ty::ConstKind::Value(_) => bug!(
-                            "encountered ConstValue in mir::ConstantKind::Ty, whereas this is expected to be in ConstantKind::Val"
-                        ),
-                        _ => {}
-                    },
-                    _ => {}
                 }
 
                 // This is a more general form of the previous case.
@@ -242,8 +235,8 @@ impl IntRange {
         let (lo, hi) = (lo ^ bias, hi ^ bias);
 
         let env = ty::ParamEnv::empty().and(ty);
-        let lo_const = mir::ConstantKind::from_bits(tcx, lo, env);
-        let hi_const = mir::ConstantKind::from_bits(tcx, hi, env);
+        let lo_const = ty::Const::from_bits(tcx, lo, env);
+        let hi_const = ty::Const::from_bits(tcx, hi, env);
 
         let kind = if lo == hi {
             PatKind::Constant { value: lo_const }

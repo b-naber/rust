@@ -1,7 +1,6 @@
 use super::eval_queries::{mk_eval_cx, op_to_const};
 use super::machine::CompileTimeEvalContext;
 use crate::interpret::{
-<<<<<<< HEAD
     intern_const_alloc_recursive, ConstValue, ImmTy, Immediate, InternKind, MemPlaceMeta,
     MemoryKind, PlaceTy, Scalar, ScalarMaybeUninit,
 };
@@ -12,20 +11,6 @@ use rustc_target::abi::{Align, VariantIdx};
 
 use crate::interpret::MPlaceTy;
 use crate::interpret::Value;
-=======
-    intern_const_alloc_recursive, ConstValue, ImmTy, Immediate, InternKind, MemoryKind, PlaceTy,
-    Pointer, Scalar, ScalarMaybeUninit,
-};
-use rustc_middle::mir::interpret::{ConstAlloc, EvalToValTreeResult, GlobalAlloc};
-use rustc_middle::mir::{Field, ProjectionElem};
-use rustc_middle::ty::ScalarInt;
-use rustc_middle::ty::{self, Ty, TyCtxt};
-use rustc_span::source_map::DUMMY_SP;
-use rustc_target::abi::VariantIdx;
-
-use crate::interpret::visitor::Value;
-use crate::interpret::MPlaceTy;
->>>>>>> 3ef9ce3e369 (implement valtree -> constvalue conversion)
 
 #[instrument(skip(ecx), level = "debug")]
 fn branches<'tcx>(
@@ -38,12 +23,7 @@ fn branches<'tcx>(
         Some(variant) => ecx.mplace_downcast(&place, variant).unwrap(),
         None => *place,
     };
-<<<<<<< HEAD
     let variant = variant.map(|variant| Some(ty::ValTree::Leaf(ScalarInt::from(variant.as_u32()))));
-=======
-    let variant =
-        variant.map(|variant| Some(ty::ValTree::Leaf(ScalarInt::from(variant.as_u32() as u64))));
->>>>>>> 3ef9ce3e369 (implement valtree -> constvalue conversion)
     debug!(?place, ?variant);
 
     let fields = (0..n).map(|i| {
@@ -56,7 +36,6 @@ fn branches<'tcx>(
     Some(ty::ValTree::Branch(ecx.tcx.arena.alloc_from_iter(branches.collect::<Option<Vec<_>>>()?)))
 }
 
-<<<<<<< HEAD
 #[instrument(skip(ecx), level = "debug")]
 fn slice_branches<'tcx>(
     ecx: &CompileTimeEvalContext<'tcx, 'tcx>,
@@ -68,21 +47,6 @@ fn slice_branches<'tcx>(
         const_to_valtree_inner(ecx, &place_elem)
     });
 
-=======
-fn slice_branches<'tcx>(
-    ecx: &CompileTimeEvalContext<'tcx, 'tcx>,
-    place: &MPlaceTy<'tcx>,
-    n: u32,
-) -> Option<ty::ValTree<'tcx>> {
-    let elems = (0..n).map(|i| {
-        let place_elem = ecx.mplace_index(place, i as u64).unwrap();
-        const_to_valtree_inner(ecx, &place_elem)
-    });
-
-    let len = Some(Some(ty::ValTree::Leaf(ScalarInt::from(n))));
-    let branches = len.into_iter().chain(elems);
-
->>>>>>> 3ef9ce3e369 (implement valtree -> constvalue conversion)
     Some(ty::ValTree::Branch(ecx.tcx.arena.alloc_from_iter(branches.collect::<Option<Vec<_>>>()?)))
 }
 
