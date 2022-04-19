@@ -185,7 +185,7 @@ pub fn valtree_to_const_value<'tcx>(
     tcx: TyCtxt<'tcx>,
     ty: Ty<'tcx>,
     valtree: ty::ValTree<'tcx>,
-) -> Option<ConstValue<'tcx>> {
+) -> ConstValue<'tcx> {
     // Basic idea: We directly construct `Scalar` values from trivial `ValTree`s
     // (those for constants with type bool, int, uint, float or char).
     // For all other types we create an `MPlace` and fill that by walking
@@ -199,7 +199,7 @@ pub fn valtree_to_const_value<'tcx>(
     match ty.kind() {
         ty::FnDef(..) => None,
         ty::Bool | ty::Int(_) | ty::Uint(_) | ty::Float(_) | ty::Char => match valtree {
-            ty::ValTree::Leaf(scalar_int) => Some(ConstValue::Scalar(Scalar::Int(scalar_int))),
+            ty::ValTree::Leaf(scalar_int) => ConstValue::Scalar(Scalar::Int(scalar_int)),
             ty::ValTree::Branch(_) => bug!(
                 "ValTrees for Bool, Int, Uint, Float or Char should have the form ValTree::Leaf"
             ),
@@ -243,7 +243,7 @@ pub fn valtree_to_const_value<'tcx>(
                     };
                     debug!(?data);
 
-                    return Some(ConstValue::Slice { data, start: 0, end: len as usize });
+                    return ConstValue::Slice { data, start: 0, end: len as usize };
                 }
                 _ => {
                     match valtree {
@@ -264,7 +264,7 @@ pub fn valtree_to_const_value<'tcx>(
                             let const_val = op_to_const(&ecx, &place.into());
                             debug!(?const_val);
 
-                            Some(const_val)
+                            const_val
                         }
                         ty::ValTree::Leaf(_) => {
                             let mut place = create_mplace_from_layout(
@@ -281,7 +281,7 @@ pub fn valtree_to_const_value<'tcx>(
                                 tcx.layout_of(param_env_ty).unwrap(),
                             );
 
-                            Some(op_to_const(&ecx, &imm.into()))
+                            op_to_const(&ecx, &imm.into())
                         }
                     }
                 }
@@ -298,7 +298,7 @@ pub fn valtree_to_const_value<'tcx>(
             let const_val = op_to_const(&ecx, &place.into());
             debug!(?const_val);
 
-            None
+            const_val
         }
         ty::Never
         | ty::Error(_)

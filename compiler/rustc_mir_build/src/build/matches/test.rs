@@ -264,7 +264,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     );
                 } else if let [success, fail] = *make_target_blocks(self) {
                     assert_eq!(value.ty(), ty);
-                    let expect = self.literal_operand(test.span, value.into());
+                    let literal = ConstantKind::from_const(value, self.tcx);
+                    let expect = self.literal_operand(test.span, literal);
                     let val = Operand::Copy(place);
                     self.compare(block, success, fail, source_info, BinOp::Eq, expect, val);
                 } else {
@@ -277,8 +278,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 let target_blocks = make_target_blocks(self);
 
                 // Test `val` by computing `lo <= val && val <= hi`, using primitive comparisons.
-                let lo = self.literal_operand(test.span, lo.into());
-                let hi = self.literal_operand(test.span, hi.into());
+                let lo = self.literal_operand(test.span, ConstantKind::from_const(lo, self.tcx));
+                let hi = self.literal_operand(test.span, ConstantKind::from_const(hi, self.tcx));
                 let val = Operand::Copy(place);
 
                 let [success, fail] = *target_blocks else {
@@ -370,7 +371,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         place: Place<'tcx>,
         mut ty: Ty<'tcx>,
     ) {
-        let mut expect = self.literal_operand(source_info.span, value.into());
+        let mut expect =
+            self.literal_operand(source_info.span, ConstantKind::from_const(value, self.tcx));
         let mut val = Operand::Copy(place);
 
         // If we're using `b"..."` as a pattern, we need to insert an

@@ -77,14 +77,14 @@ pub(crate) fn try_destructure_const<'tcx>(
                 let field_consts = branches
                     .iter()
                     .map(|b| {
-                        tcx.mk_const(ty::ConstS { val: ty::ConstKind::Value(b), ty: *inner_ty })
+                        tcx.mk_const(ty::ConstS { val: ty::ConstKind::Value(*b), ty: *inner_ty })
                     })
                     .collect::<Vec<_>>();
                 debug!(?field_consts);
 
                 (field_consts, None)
             }
-            ty::Adt(def, _) if def.variants.is_empty() => bug!("unreachable"),
+            ty::Adt(def, _) if def.variants().is_empty() => bug!("unreachable"),
             ty::Adt(def, substs) if def.is_enum() => {
                 let variant_idx = if def.is_enum() {
                     VariantIdx::from_u32(branches[0].unwrap_leaf().try_to_u32().unwrap())
@@ -99,7 +99,10 @@ pub(crate) fn try_destructure_const<'tcx>(
                 for field in fields {
                     let field_ty = field.ty(tcx, substs);
                     let field_valtree = branches[valtree_idx]; // first element of branches is variant
-                    let field_const = tcx.mk_const(ty::ConstS { val: field_valtree, ty: field_ty });
+                    let field_const = tcx.mk_const(ty::ConstS {
+                        val: ty::ConstKind::Value(field_valtree),
+                        ty: field_ty,
+                    });
                     field_consts.push(field_const);
                     valtree_idx += 1;
                 }
@@ -110,7 +113,7 @@ pub(crate) fn try_destructure_const<'tcx>(
             _ => bug!("cannot destructure constant {:?}", _const.val()),
         };
 
-        let fields = tcx.arena.alloc_from_iter(fields.iter());
+        let fields = tcx.arena.alloc_from_iter(fields.into_iter());
 
         Some(mir::DestructuredConst { variant, fields })
     } else {
@@ -130,13 +133,13 @@ pub(crate) fn destructure_mir_constant<'tcx>(
     // We go to `usize` as we cannot allocate anything bigger anyway.
     let (field_count, variant, down) = match val.ty().kind() {
         ty::Array(_, len) => (usize::try_from(len.eval_usize(tcx, param_env)).unwrap(), None, op),
-        ty::Adt(def, _) if def.variants.is_empty() => {
+        ty::Adt(def, _) if def.variants().is_empty() => {
             return mir::DestructuredMirConstant { variant: None, fields: &[] };
         }
         ty::Adt(def, _) => {
             let variant = ecx.read_discriminant(&op).unwrap().1;
             let down = ecx.operand_downcast(&op, variant).unwrap();
-            (def.variants[variant].fields.len(), Some(variant), down)
+            (def.variants()[variant].fields.len(), Some(variant), down)
         }
         ty::Tuple(substs) => (substs.len(), None, op),
         _ => bug!("cannot destructure constant {:?}", val),

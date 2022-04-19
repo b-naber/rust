@@ -3151,6 +3151,16 @@ impl<'tcx> ConstantKind<'tcx> {
             }
         }
     }
+
+    pub fn from_const(c: ty::Const<'tcx>, tcx: TyCtxt<'tcx>) -> Self {
+        match c.val() {
+            ty::ConstKind::Value(valtree) => {
+                let const_val = tcx.valtree_to_const_val((c.ty(), valtree));
+                Self::Val(const_val, c.ty())
+            }
+            _ => Self::Ty(c),
+        }
+    }
 }
 
 /// A collection of projections into user types.
