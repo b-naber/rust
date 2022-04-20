@@ -136,12 +136,12 @@ impl IntRange {
     fn from_const<'tcx>(
         tcx: TyCtxt<'tcx>,
         param_env: ty::ParamEnv<'tcx>,
-        value: mir::ConstantKind<'tcx>,
+        value: ty::Const<'tcx>,
     ) -> Option<IntRange> {
         let ty = value.ty();
         if let Some((target_size, bias)) = Self::integral_size_and_signed_bias(tcx, ty) {
             let val = (|| {
-                if let ty::ConstKind::Value(ty::ValTree::Leaf(scalar)) = value {
+                if let ty::ConstKind::Value(ty::ValTree::Leaf(scalar)) = value.val() {
                     // For this specific pattern we can skip a lot of effort and go
                     // straight to the result, after doing a bit of checking. (We
                     // could remove this branch and just fall through, which
@@ -631,9 +631,9 @@ pub(super) enum Constructor<'tcx> {
     /// Ranges of integer literal values (`2`, `2..=5` or `2..5`).
     IntRange(IntRange),
     /// Ranges of floating-point literal values (`2.0..=5.2`).
-    FloatRange(mir::ConstantKind<'tcx>, mir::ConstantKind<'tcx>, RangeEnd),
+    FloatRange(ty::Const<'tcx>, ty::Const<'tcx>, RangeEnd),
     /// String literals. Strings are not quite the same as `&[u8]` so we treat them separately.
-    Str(mir::ConstantKind<'tcx>),
+    Str(ty::Const<'tcx>),
     /// Array and slice patterns.
     Slice(Slice),
     /// Constants that must not be matched structurally. They are treated as black

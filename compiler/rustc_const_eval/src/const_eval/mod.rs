@@ -91,7 +91,7 @@ pub(crate) fn try_destructure_const<'tcx>(
                 } else {
                     VariantIdx::from_u32(0)
                 };
-                let fields = def.variant(variant_idx).fields;
+                let fields = &def.variant(variant_idx).fields;
                 let mut field_consts = vec![];
 
                 // Note: First element in ValTree corresponds to variant of enum
@@ -161,33 +161,9 @@ pub(crate) fn deref_const<'tcx>(
     param_env: ty::ParamEnv<'tcx>,
     val: ty::Const<'tcx>,
 ) -> ty::Const<'tcx> {
-    trace!("deref_const: {:?}", val);
-    let ecx = mk_eval_cx(tcx, DUMMY_SP, param_env, false);
-    let op = ecx.const_to_op(val, None).unwrap();
-    let mplace = ecx.deref_operand(&op).unwrap();
-    if let Some(alloc_id) = mplace.ptr.provenance {
-        assert_eq!(
-            tcx.get_global_alloc(alloc_id).unwrap().unwrap_memory().inner().mutability,
-            Mutability::Not,
-            "deref_const cannot be used with mutable allocations as \
-            that could allow pattern matching to observe mutable statics",
-        );
-    }
+    let pointee_type =
+        val.ty().builtin_deref(true).expect("`deref_const` called on non-ptr type").ty;
+    debug!(?pointee_type);
 
-    let ty = match mplace.meta {
-        MemPlaceMeta::None => mplace.layout.ty,
-        MemPlaceMeta::Poison => bug!("poison metadata in `deref_const`: {:#?}", mplace),
-        // In case of unsized types, figure out the real type behind.
-        MemPlaceMeta::Meta(scalar) => match mplace.layout.ty.kind() {
-            ty::Str => bug!("there's no sized equivalent of a `str`"),
-            ty::Slice(elem_ty) => tcx.mk_array(*elem_ty, scalar.to_machine_usize(&tcx).unwrap()),
-            _ => bug!(
-                "type {} should not have metadata, but had {:?}",
-                mplace.layout.ty,
-                mplace.meta
-            ),
-        },
-    };
-
-    tcx.mk_const(ty::ConstS { val: ty::ConstKind::Value(op_to_const(&ecx, &mplace.into())), ty })
+    tcx.mk_const(ty::ConstS { val: val.val(), ty: pointee_type })
 }

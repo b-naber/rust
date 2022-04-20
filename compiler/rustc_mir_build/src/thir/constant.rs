@@ -41,7 +41,7 @@ crate fn lit_to_const<'tcx>(
             ty::ValTree::from_raw_bytes(tcx, bytes)
         }
         (ast::LitKind::Byte(n), ty::Uint(ty::UintTy::U8)) => {
-            ty::ValTree::from_scalar_int(*n.into())
+            ty::ValTree::from_scalar_int((*n).into())
         }
         (ast::LitKind::Int(n, _), ty::Uint(_)) | (ast::LitKind::Int(n, _), ty::Int(_)) => {
             let scalar_int =
@@ -51,8 +51,8 @@ crate fn lit_to_const<'tcx>(
         (ast::LitKind::Float(n, _), ty::Float(fty)) => {
             parse_float_into_valtree(*n, *fty, neg).ok_or(LitToConstError::Reported)?
         }
-        (ast::LitKind::Bool(b), ty::Bool) => ty::ValTree::from_scalar_int(*b.into()),
-        (ast::LitKind::Char(c), ty::Char) => ty::ValTree::from_scalar_int(*c.into()),
+        (ast::LitKind::Bool(b), ty::Bool) => ty::ValTree::from_scalar_int((*b).into()),
+        (ast::LitKind::Char(c), ty::Char) => ty::ValTree::from_scalar_int((*c).into()),
         (ast::LitKind::Err(_), _) => return Err(LitToConstError::Reported),
         _ => return Err(LitToConstError::TypeError),
     };

@@ -197,7 +197,7 @@ pub fn valtree_to_const_value<'tcx>(
     let param_env_ty = ty::ParamEnv::empty().and(ty);
 
     match ty.kind() {
-        ty::FnDef(..) => None,
+        ty::FnDef(..) => bug!("should never encounter ty::FnDef here"),
         ty::Bool | ty::Int(_) | ty::Uint(_) | ty::Float(_) | ty::Char => match valtree {
             ty::ValTree::Leaf(scalar_int) => ConstValue::Scalar(Scalar::Int(scalar_int)),
             ty::ValTree::Branch(_) => bug!(
