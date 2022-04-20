@@ -489,8 +489,13 @@ impl<'a, 'tcx> PatCtxt<'a, 'tcx> {
         debug!("mir_structural_match_violation({:?}) -> {}", qpath, mir_structural_match_violation);
 
         match self.tcx.const_eval_instance_for_typeck(param_env_reveal_all, instance, Some(span)) {
-            Ok(value) => {
-                let const_ = ty::Const::from_value(self.tcx, value, ty);
+            Ok(valtree) => {
+                let const_ = ty::Const::from_value(
+                    self.tcx,
+                    valtree
+                        .expect(&format!("valtree creation failed for resolving {:?}", instance)),
+                    ty,
+                );
                 let pattern = self.const_to_pat(const_, id, span, mir_structural_match_violation);
 
                 if !is_associated_const {
@@ -750,18 +755,15 @@ crate fn compare_const_vals<'tcx>(
 ) -> Option<Ordering> {
     let from_bool = |v: bool| v.then_some(Ordering::Equal);
 
+    if a == b {
+        return from_bool(true);
+    }
+
     let fallback = || from_bool(a == b);
 
     // Use the fallback if any type differs
     if a.ty() != b.ty() || a.ty() != ty {
         return fallback();
-    }
-
-    // Early return for equal constants (so e.g. references to ZSTs can be compared, even if they
-    // are just integer addresses).
-    // FIXME This might be wrong
-    if a == b {
-        return from_bool(true);
     }
 
     let a_bits = a.try_eval_bits(tcx, param_env, ty);
@@ -791,14 +793,9 @@ crate fn compare_const_vals<'tcx>(
         };
     }
 
-    if let ty::Str = ty.kind() && let (
-        ty::ConstKind::Value(a_val @ ConstValue::Slice { .. }),
-        ty::ConstKind::Value(b_val @ ConstValue::Slice { .. }),
-    ) = (a.val(), b.val())
-    {
-        let a_bytes = get_slice_bytes(&tcx, a_val);
-        let b_bytes = get_slice_bytes(&tcx, b_val);
-        return from_bool(a_bytes == b_bytes);
+    if let ty::Str = ty.kind() {
+        return from_bool(a.val() == b.val());
     }
+
     fallback()
 }
