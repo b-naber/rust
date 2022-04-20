@@ -72,6 +72,7 @@ where
     }
 }
 
+#[instrument(skip(tcx, passes), level = "debug")]
 pub fn run_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, passes: &[&dyn MirPass<'tcx>]) {
     let start_phase = body.phase;
     let mut cnt = 0;
@@ -88,6 +89,7 @@ pub fn run_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, passes: &[&dyn
         }
 
         let name = pass.name();
+        debug!("pass name: {:?}", name);
         let dump_enabled = pass.is_mir_dump_enabled();
 
         if dump_enabled {

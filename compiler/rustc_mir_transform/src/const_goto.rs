@@ -31,6 +31,7 @@ impl<'tcx> MirPass<'tcx> for ConstGoto {
         sess.mir_opt_level() >= 4
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         trace!("Running ConstGoto on {:?}", body.source);
         let param_env = tcx.param_env_reveal_all_normalized(body.source.def_id());

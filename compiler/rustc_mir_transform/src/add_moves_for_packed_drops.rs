@@ -39,6 +39,7 @@ use rustc_middle::mir::patch::MirPatch;
 pub struct AddMovesForPackedDrops;
 
 impl<'tcx> MirPass<'tcx> for AddMovesForPackedDrops {
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         debug!("add_moves_for_packed_drops({:?} @ {:?})", body.source, body.span);
         add_moves_for_packed_drops(tcx, body);

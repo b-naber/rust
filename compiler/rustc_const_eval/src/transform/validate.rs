@@ -34,6 +34,7 @@ pub struct Validator {
 }
 
 impl<'tcx> MirPass<'tcx> for Validator {
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         // FIXME(JakobDegen): These bodies never instantiated in codegend anyway, so it's not
         // terribly important that they pass the validator. However, I think other passes might

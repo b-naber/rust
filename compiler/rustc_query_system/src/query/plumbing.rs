@@ -303,6 +303,7 @@ where
 /// which will be used if the query is not in the cache and we need
 /// to compute it.
 #[inline]
+#[instrument(skip(tcx, cache, on_hit), level = "debug")]
 pub fn try_get_cached<'a, CTX, C, R, OnHit>(
     tcx: CTX,
     cache: &'a C,
@@ -316,10 +317,13 @@ where
     OnHit: FnOnce(&C::Stored) -> R,
 {
     cache.lookup(&key, |value, index| {
+        debug!("inside closure of cache.lookup");
         if unlikely!(tcx.profiler().enabled()) {
             tcx.profiler().query_cache_hit(index.into());
         }
+        debug!("trying to read index {:?} from dep_graph", index);
         tcx.dep_graph().read_index(index);
+        debug!("about to call on_hit");
         on_hit(value)
     })
 }

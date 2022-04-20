@@ -25,6 +25,7 @@ use rustc_target::spec::PanicStrategy;
 pub struct AbortUnwindingCalls;
 
 impl<'tcx> MirPass<'tcx> for AbortUnwindingCalls {
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         let def_id = body.source.def_id();
         let kind = tcx.def_kind(def_id);

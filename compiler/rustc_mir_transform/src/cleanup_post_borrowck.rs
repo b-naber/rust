@@ -31,6 +31,7 @@ pub struct DeleteNonCodegenStatements<'tcx> {
 }
 
 impl<'tcx> MirPass<'tcx> for CleanupNonCodegenStatements {
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         let mut delete = DeleteNonCodegenStatements { tcx };
         delete.visit_body(body);

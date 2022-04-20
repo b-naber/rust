@@ -45,7 +45,9 @@ macro_rules! fixed_size_encoding_byte_len_and_defaults {
             let b = unsafe {
                 std::slice::from_raw_parts(b.as_ptr() as *const [u8; BYTE_LEN], b.len() / BYTE_LEN)
             };
-            b.get(i).map(|b| FixedSizeEncoding::from_bytes(b))
+            let result = b.get(i).map(|b| FixedSizeEncoding::from_bytes(b));
+            debug!("finished maybe_read_from_bytes");
+            result
         }
         fn write_to_bytes_at(self, b: &mut [u8], i: usize) {
             const BYTE_LEN: usize = $byte_len;
@@ -195,6 +197,7 @@ where
         debug!("Table::lookup: index={:?} len={:?}", i, self.meta);
 
         let start = self.position.get();
+        debug!("start: {:?}", start);
         let bytes = &metadata.blob()[start..start + self.meta];
         <Option<T>>::maybe_read_from_bytes_at(bytes, i.index())?
     }

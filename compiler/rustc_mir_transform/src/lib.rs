@@ -439,6 +439,7 @@ fn run_post_borrowck_cleanup_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tc
     pm::run_passes(tcx, body, post_borrowck_cleanup);
 }
 
+#[instrument(skip(tcx, body), level = "debug")]
 fn run_optimization_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
     fn o1<T>(x: T) -> WithMinOptLevel<T> {
         WithMinOptLevel(1, x)
@@ -507,12 +508,14 @@ fn run_optimization_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
 }
 
 /// Optimize the MIR and prepare it for codegen.
+#[instrument(skip(tcx), level = "debug")]
 fn optimized_mir<'tcx>(tcx: TyCtxt<'tcx>, did: DefId) -> &'tcx Body<'tcx> {
     let did = did.expect_local();
     assert_eq!(ty::WithOptConstParam::try_lookup(did, tcx), None);
     tcx.arena.alloc(inner_optimized_mir(tcx, did))
 }
 
+#[instrument(skip(tcx), level = "debug")]
 fn inner_optimized_mir(tcx: TyCtxt<'_>, did: LocalDefId) -> Body<'_> {
     if tcx.is_constructor(did.to_def_id()) {
         // There's no reason to run all of the MIR passes on constructors when
@@ -530,8 +533,10 @@ fn inner_optimized_mir(tcx: TyCtxt<'_>, did: LocalDefId) -> Body<'_> {
         None => {}
         Some(other) => panic!("do not use `optimized_mir` for constants: {:?}", other),
     }
+    debug!("about to call mir_drops_elaborated...");
     let mut body =
         tcx.mir_drops_elaborated_and_const_checked(ty::WithOptConstParam::unknown(did)).steal();
+    debug!("body: {:#?}", body);
     run_optimization_passes(tcx, &mut body);
 
     debug_assert!(!body.has_free_regions(), "Free regions in optimized MIR");

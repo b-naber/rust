@@ -47,6 +47,7 @@ impl SimplifyCfg {
     }
 }
 
+#[instrument(skip(tcx, body), level = "debug")]
 pub fn simplify_cfg<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
     CfgSimplifier::new(body).simplify();
     remove_dead_blocks(tcx, body);
@@ -60,6 +61,7 @@ impl<'tcx> MirPass<'tcx> for SimplifyCfg {
         Cow::Borrowed(&self.label)
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         debug!("SimplifyCfg({:?}) - simplifying {:?}", self.label, body.source);
         simplify_cfg(tcx, body);
@@ -72,6 +74,7 @@ pub struct CfgSimplifier<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
+    #[instrument(skip(body), level = "debug")]
     pub fn new(body: &'a mut Body<'tcx>) -> Self {
         let mut pred_count = IndexVec::from_elem(0u32, body.basic_blocks());
 
@@ -92,6 +95,7 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
         CfgSimplifier { basic_blocks, pred_count }
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub fn simplify(mut self) {
         self.strip_nops();
 

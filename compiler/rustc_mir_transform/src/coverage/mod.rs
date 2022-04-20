@@ -53,6 +53,7 @@ impl<'tcx> MirPass<'tcx> for InstrumentCoverage {
         sess.instrument_coverage()
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, mir_body: &mut mir::Body<'tcx>) {
         let mir_source = mir_body.source;
 

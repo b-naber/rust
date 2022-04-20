@@ -23,6 +23,7 @@ impl<'tcx> MirPass<'tcx> for ElaborateDrops {
         Some(MirPhase::DropsLowered)
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         debug!("elaborate_drops({:?} @ {:?})", body.source, body.span);
 

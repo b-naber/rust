@@ -19,7 +19,8 @@ impl<'tcx> MirPass<'tcx> for ConstDebugInfo {
         sess.opts.debugging_opts.unsound_mir_opts && sess.mir_opt_level() > 0
     }
 
-    fn run_pass(&self, _: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+    #[instrument(skip(self, tcx), level = "debug")]
+    fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         trace!("running ConstDebugInfo on {:?}", body.source);
 
         for (local, constant) in find_optimization_oportunities(body) {

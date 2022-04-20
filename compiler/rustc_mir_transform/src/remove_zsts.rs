@@ -12,6 +12,7 @@ impl<'tcx> MirPass<'tcx> for RemoveZsts {
         sess.mir_opt_level() > 0
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         // Avoid query cycles (generators require optimized MIR for layout).
         if tcx.type_of(body.source.def_id()).is_generator() {

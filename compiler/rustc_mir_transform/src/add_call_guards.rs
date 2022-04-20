@@ -31,7 +31,8 @@ pub use self::AddCallGuards::*;
  */
 
 impl<'tcx> MirPass<'tcx> for AddCallGuards {
-    fn run_pass(&self, _tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+    #[instrument(skip(self, tcx), level = "debug")]
+    fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         self.add_call_guards(body);
     }
 }

@@ -10,6 +10,7 @@ impl<'tcx> MirPass<'tcx> for Deaggregator {
         Some(MirPhase::Deaggregated)
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         let (basic_blocks, local_decls) = body.basic_blocks_and_local_decls_mut();
         let local_decls = &*local_decls;

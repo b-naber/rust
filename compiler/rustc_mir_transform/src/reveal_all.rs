@@ -12,6 +12,7 @@ impl<'tcx> MirPass<'tcx> for RevealAll {
         sess.opts.mir_opt_level() >= 3 || super::inline::Inline.is_enabled(sess)
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         // Do not apply this transformation to generators.
         if body.generator.is_some() {

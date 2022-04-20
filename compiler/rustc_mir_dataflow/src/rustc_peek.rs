@@ -21,6 +21,7 @@ pub struct SanityCheck;
 
 // FIXME: This should be a `MirLint`, but it needs to be moved back to `rustc_mir_transform` first.
 impl<'tcx> MirPass<'tcx> for SanityCheck {
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         use crate::has_rustc_mir_with;
         let def_id = body.source.def_id();

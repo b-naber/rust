@@ -624,6 +624,8 @@ impl<'a, 'b, 'tcx> TypeFolder<'tcx> for AssocTypeNormalizer<'a, 'b, 'tcx> {
             constant
         } else {
             let constant = constant.super_fold_with(self);
+            debug!(?constant);
+            debug!("self.param_env: {:?}", self.param_env);
             constant.eval(self.selcx.tcx(), self.param_env)
         }
     }

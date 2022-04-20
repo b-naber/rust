@@ -62,6 +62,7 @@ impl<'tcx> MirPass<'tcx> for AddRetag {
         sess.opts.debugging_opts.mir_emit_retag
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         // We need an `AllCallEdges` pass before we can do any work.
         super::add_call_guards::AllCallEdges.run_pass(tcx, body);
