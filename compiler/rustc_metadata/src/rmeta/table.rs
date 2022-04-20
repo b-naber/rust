@@ -334,6 +334,7 @@ where
         debug!("Table::lookup: index={:?} len={:?}", i, self.meta);
 
         let start = self.position.get();
+        debug!("start: {:?}", start);
         let bytes = &metadata.blob()[start..start + self.meta];
         let (bytes, []) = bytes.as_chunks::<N>() else { panic!() };
         let bytes = bytes.get(i.index())?;

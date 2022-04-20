@@ -45,6 +45,7 @@ impl<'tcx> MirPass<'tcx> for PromoteTemps<'tcx> {
         Some(MirPhase::ConstsPromoted)
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         // There's not really any point in promoting errorful MIR.
         //

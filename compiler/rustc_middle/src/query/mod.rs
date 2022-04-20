@@ -933,7 +933,6 @@ rustc_queries! {
         key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>
     ) -> EvalToValTreeResult<'tcx> {
         desc { "evaluate type-level constant" }
-        remap_env_constness
     }
 
     /// Converts a type level constant value into `ConstValue`

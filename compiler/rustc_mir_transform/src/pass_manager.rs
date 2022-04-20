@@ -72,6 +72,7 @@ where
     }
 }
 
+#[instrument(skip(tcx, passes), level = "debug")]
 pub fn run_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>, passes: &[&dyn MirPass<'tcx>]) {
     let start_phase = body.phase;
     let mut cnt = 0;

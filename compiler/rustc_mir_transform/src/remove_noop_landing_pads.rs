@@ -15,7 +15,8 @@ impl<'tcx> MirPass<'tcx> for RemoveNoopLandingPads {
         sess.panic_strategy() != PanicStrategy::Abort
     }
 
-    fn run_pass(&self, _: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+    #[instrument(skip(self, tcx), level = "debug")]
+    fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         debug!("remove_noop_landing_pads({:?})", body);
         self.remove_nop_landing_pads(body)
     }
@@ -80,7 +81,10 @@ impl RemoveNoopLandingPads {
         }
     }
 
+    #[instrument(skip(self, body), level = "debug")]
     fn remove_nop_landing_pads(&self, body: &mut Body<'_>) {
+        debug!("body: {:#?}", body);
+
         // make sure there's a single resume block
         let resume_block = {
             let patch = MirPatch::new(body);

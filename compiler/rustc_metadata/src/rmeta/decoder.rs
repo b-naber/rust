@@ -278,9 +278,13 @@ impl<'a: 'x, 'tcx: 'x, 'x, T: Decodable<DecodeContext<'a, 'tcx>>> Lazy<[T]> {
         self,
         metadata: M,
     ) -> impl ExactSizeIterator<Item = T> + Captures<'a> + Captures<'tcx> + 'x {
+        debug!("Inside Lazy::decode");
         let mut dcx = metadata.decoder(self.position.get());
         dcx.lazy_state = LazyState::NodeStart(self.position);
-        (0..self.meta).map(move |_| T::decode(&mut dcx))
+        let result = (0..self.meta).map(move |_| T::decode(&mut dcx));
+        debug!("finished decode");
+
+        result
     }
 }
 
@@ -424,6 +428,7 @@ impl<'a, 'tcx> DecodeContext<'a, 'tcx> {
     }
 
     fn read_lazy_with_meta<T: ?Sized + LazyMeta>(&mut self, meta: T::Meta) -> Lazy<T> {
+        debug!("read_lazy_with_meta");
         let distance = self.read_usize();
         let position = match self.lazy_state {
             LazyState::NoNode => bug!("read_lazy_with_meta: outside of a metadata node"),

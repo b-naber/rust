@@ -2923,7 +2923,10 @@ impl<'tcx> ConstantKind<'tcx> {
     #[inline]
     pub fn try_to_value(self) -> Option<interpret::ConstValue<'tcx>> {
         match self {
-            ConstantKind::Ty(c) => bug!("should not encounter a ValTree here"),
+            ConstantKind::Ty(c) => match c.val() {
+                ty::ConstKind::Value(valtree) => bug!("should not encounter valtree here"),
+                _ => None,
+            },
             ConstantKind::Val(val, _) => Some(val),
         }
     }

@@ -85,16 +85,19 @@ where
     type Key = K;
 
     #[inline(always)]
+    #[instrument(skip(self, on_hit), level = "debug")]
     fn lookup<R, OnHit>(&self, key: &K, on_hit: OnHit) -> Result<R, ()>
     where
         OnHit: FnOnce(&V, DepNodeIndex) -> R,
     {
         let key_hash = sharded::make_hash(key);
+        debug!(?key_hash);
         #[cfg(parallel_compiler)]
         let lock = self.cache.get_shard_by_hash(key_hash).lock();
         #[cfg(not(parallel_compiler))]
         let lock = self.cache.lock();
         let result = lock.raw_entry().from_key_hashed_nocheck(key_hash, key);
+        debug!("got result: {:?}", result);
 
         if let Some((_, value)) = result {
             let hit_result = on_hit(&value.0, value.1);

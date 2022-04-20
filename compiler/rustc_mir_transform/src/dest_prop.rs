@@ -125,6 +125,7 @@ impl<'tcx> MirPass<'tcx> for DestinationPropagation {
         sess.opts.debugging_opts.unsound_mir_opts && sess.mir_opt_level() >= 3
     }
 
+    #[instrument(skip(self, tcx), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         let def_id = body.source.def_id();
 

@@ -17,7 +17,8 @@ impl<'tcx> MirPass<'tcx> for Marker {
         Cow::Borrowed(self.0)
     }
 
-    fn run_pass(&self, _tcx: TyCtxt<'tcx>, _body: &mut Body<'tcx>) {}
+    #[instrument(skip(self, tcx), level = "debug")]
+    fn run_pass(&self, tcx: TyCtxt<'tcx>, _body: &mut Body<'tcx>) {}
 }
 
 pub fn emit_mir(tcx: TyCtxt<'_>, outputs: &OutputFilenames) -> io::Result<()> {

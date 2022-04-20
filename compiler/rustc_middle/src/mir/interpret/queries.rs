@@ -11,6 +11,7 @@ impl<'tcx> TyCtxt<'tcx> {
     /// Evaluates a constant without providing any substitutions. This is useful to evaluate consts
     /// that can't take any generic arguments like statics, const items or enum discriminants. If a
     /// generic parameter is used within the constant `ErrorHandled::ToGeneric` will be returned.
+    #[instrument(skip(self), level = "debug")]
     pub fn const_eval_poly(self, def_id: DefId) -> EvalToConstValueResult<'tcx> {
         // In some situations def_id will have substitutions within scope, but they aren't allowed
         // to be used. So we can't use `Instance::mono`, instead we feed unresolved substitutions
@@ -105,6 +106,7 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 
     /// Evaluate a constant to a `ConstValue`.
+    #[instrument(skip(self), level = "debug")]
     pub fn const_eval_global_id(
         self,
         param_env: ty::ParamEnv<'tcx>,
@@ -123,6 +125,7 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 
     /// Evaluate a constant to a type-level constant.
+    #[instrument(skip(self), level = "debug")]
     pub fn const_eval_global_id_for_typeck(
         self,
         param_env: ty::ParamEnv<'tcx>,
@@ -130,9 +133,11 @@ impl<'tcx> TyCtxt<'tcx> {
         span: Option<Span>,
     ) -> EvalToValTreeResult<'tcx> {
         let param_env = param_env.with_const();
+        debug!(?param_env);
         // Const-eval shouldn't depend on lifetimes at all, so we can erase them, which should
         // improve caching of queries.
         let inputs = self.erase_regions(param_env.and(cid));
+        debug!(?inputs);
         if let Some(span) = span {
             self.at(span).eval_to_valtree(inputs)
         } else {
