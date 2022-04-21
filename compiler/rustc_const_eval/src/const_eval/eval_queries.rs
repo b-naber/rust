@@ -196,7 +196,7 @@ pub(super) fn op_to_const<'tcx>(
 }
 
 #[instrument(skip(tcx), level = "debug")]
-fn turn_into_const_value<'tcx>(
+pub(crate) fn turn_into_const_value<'tcx>(
     tcx: TyCtxt<'tcx>,
     constant: ConstAlloc<'tcx>,
     key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>,

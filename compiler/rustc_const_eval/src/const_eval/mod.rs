@@ -6,13 +6,16 @@ use rustc_errors::ErrorGuaranteed;
 use rustc_hir::Mutability;
 use rustc_middle::mir;
 use rustc_middle::mir::interpret::{ErrorHandled, EvalToValTreeResult, GlobalId};
+use rustc_middle::traits::ObligationCause;
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_span::{source_map::DUMMY_SP, symbol::Symbol};
 use rustc_target::abi::VariantIdx;
 
+use std::iter;
+
 use crate::interpret::{
-    intern_const_alloc_recursive, ConstValue, InternKind, InterpCx, InterpResult, MemPlaceMeta,
-    Scalar,
+    get_slice_bytes, intern_const_alloc_recursive, ConstValue, GlobalAlloc, InternKind, InterpCx,
+    InterpResult, MemPlaceMeta, Scalar,
 };
 
 mod error;
@@ -58,7 +61,92 @@ pub(crate) fn eval_to_valtree<'tcx>(
     let place = ecx.raw_const_to_mplace(const_alloc).unwrap();
     debug!(?place);
 
-    Ok(const_to_valtree_inner(&ecx, &place))
+    let valtree = const_to_valtree_inner(&ecx, &place);
+
+    let ty = const_alloc.ty;
+    let const_val_old = turn_into_const_value(tcx, const_alloc, param_env.and(cid));
+    let old = mir::ConstantKind::from_value(const_val_old, ty);
+    let const_val_new = tcx.valtree_to_const_val((const_alloc.ty, valtree.unwrap()));
+    let new = mir::ConstantKind::from_value(const_val_new, ty);
+
+    if !check_const_value_eq(tcx, param_env, old, new) {
+        bug!("old const_val {:?} not equal to new const_val {:?}", const_val_old, const_val_new);
+    }
+
+    Ok(valtree)
+}
+
+fn check_const_value_eq<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
+    a: mir::ConstantKind<'tcx>,
+    b: mir::ConstantKind<'tcx>,
+) -> bool {
+    match (a, b) {
+        (mir::ConstantKind::Val(a_const_val, a_ty), mir::ConstantKind::Val(b_const_val, b_ty)) => {
+            match (a_const_val, b_const_val) {
+                (
+                    ConstValue::Scalar(Scalar::Int(a_val)),
+                    ConstValue::Scalar(Scalar::Int(b_val)),
+                ) => a_val == b_val,
+                (
+                    ConstValue::Scalar(Scalar::Ptr(a_val, _a_size)),
+                    ConstValue::Scalar(Scalar::Ptr(b_val, _b_size)),
+                ) => {
+                    a_val == b_val
+                        || match (
+                            tcx.global_alloc(a_val.provenance),
+                            tcx.global_alloc(b_val.provenance),
+                        ) {
+                            (
+                                GlobalAlloc::Function(a_instance),
+                                GlobalAlloc::Function(b_instance),
+                            ) => a_instance == b_instance,
+                            _ => false,
+                        }
+                }
+
+                (ConstValue::Slice { .. }, ConstValue::Slice { .. }) => {
+                    get_slice_bytes(&tcx, a_const_val) == get_slice_bytes(&tcx, b_const_val)
+                }
+
+                (
+                    ConstValue::ByRef { alloc: alloc_a, .. },
+                    ConstValue::ByRef { alloc: alloc_b, .. },
+                ) if a.ty().is_ref() || b.ty().is_ref() => {
+                    if a.ty().is_ref() && b.ty().is_ref() {
+                        alloc_a == alloc_b
+                    } else {
+                        false
+                    }
+                }
+                (ConstValue::ByRef { .. }, ConstValue::ByRef { .. }) => {
+                    let a_destructured = tcx.destructure_mir_constant(param_env.and(a));
+                    let b_destructured = tcx.destructure_mir_constant(param_env.and(b));
+
+                    // Both the variant and each field have to be equal.
+                    if a_destructured.variant == b_destructured.variant {
+                        for (a_field, b_field) in
+                            iter::zip(a_destructured.fields, b_destructured.fields)
+                        {
+                            if !check_const_value_eq(tcx, param_env, *a_field, *b_field) {
+                                return false;
+                            }
+                        }
+
+                        true
+                    } else {
+                        false
+                    }
+                }
+
+                _ => false,
+            }
+        }
+        _ => {
+            bug!("expected concrete values, found: a: {:?}, b: {:?}", a, b);
+        }
+    }
 }
 
 /// Tries to destructure constants of type Array or Adt into the constants
@@ -94,7 +182,7 @@ pub(crate) fn try_destructure_const<'tcx>(
                 let fields = &def.variant(variant_idx).fields;
                 let mut field_consts = vec![];
 
-                // Note: First element in ValTree corresponds to variant of enum
+                // Note: First element inValTree corresponds to variant of enum
                 let mut valtree_idx = if def.is_enum() { 1 } else { 0 };
                 for field in fields {
                     let field_ty = field.ty(tcx, substs);

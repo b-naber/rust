@@ -41,6 +41,7 @@ use rustc_span::symbol::{sym, Ident, Symbol};
 use rustc_span::{self, BytePos, ExpnId, Pos, Span, SyntaxContext, DUMMY_SP};
 
 use proc_macro::bridge::client::ProcMacro;
+use std::any::type_name;
 use std::io;
 use std::mem;
 use std::num::NonZeroUsize;
@@ -323,6 +324,10 @@ where
     }
 }
 
+fn print_type_of<T>(_: &T) {
+    println!("{}", type_name::<T>())
+}
+
 impl<'a, 'tcx, T> LazyQueryDecodable<'a, 'tcx, &'tcx T> for Option<Lazy<T>>
 where
     T: Decodable<DecodeContext<'a, 'tcx>>,
@@ -334,7 +339,13 @@ where
         tcx: TyCtxt<'tcx>,
         err: impl FnOnce() -> !,
     ) -> &'tcx T {
-        if let Some(l) = self { tcx.arena.alloc(l.decode((cdata, tcx))) } else { err() }
+        if let Some(l) = self {
+            debug!("decode_query");
+            print_type_of(&l);
+            tcx.arena.alloc(l.decode((cdata, tcx)))
+        } else {
+            err()
+        }
     }
 }
 
@@ -580,6 +591,7 @@ impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for ExpnId {
 
 impl<'a, 'tcx> Decodable<DecodeContext<'a, 'tcx>> for Span {
     fn decode(decoder: &mut DecodeContext<'a, 'tcx>) -> Span {
+        debug!("Span::decode");
         let ctxt = SyntaxContext::decode(decoder);
         let tag = u8::decode(decoder);
 

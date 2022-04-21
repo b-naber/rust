@@ -755,15 +755,15 @@ crate fn compare_const_vals<'tcx>(
 ) -> Option<Ordering> {
     let from_bool = |v: bool| v.then_some(Ordering::Equal);
 
-    if a == b {
-        return from_bool(true);
-    }
-
     let fallback = || from_bool(a == b);
 
     // Use the fallback if any type differs
     if a.ty() != b.ty() || a.ty() != ty {
         return fallback();
+    }
+
+    if a.val() == b.val() {
+        return from_bool(true);
     }
 
     let a_bits = a.try_eval_bits(tcx, param_env, ty);

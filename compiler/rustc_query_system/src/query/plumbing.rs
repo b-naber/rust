@@ -317,13 +317,10 @@ where
     OnHit: FnOnce(&C::Stored) -> R,
 {
     cache.lookup(&key, |value, index| {
-        debug!("inside closure of cache.lookup");
         if unlikely!(tcx.profiler().enabled()) {
             tcx.profiler().query_cache_hit(index.into());
         }
-        debug!("trying to read index {:?} from dep_graph", index);
         tcx.dep_graph().read_index(index);
-        debug!("about to call on_hit");
         on_hit(value)
     })
 }
