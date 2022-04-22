@@ -65,88 +65,9 @@ pub(crate) fn eval_to_valtree<'tcx>(
 
     let ty = const_alloc.ty;
     let const_val_old = turn_into_const_value(tcx, const_alloc, param_env.and(cid));
-    let old = mir::ConstantKind::from_value(const_val_old, ty);
     let const_val_new = tcx.valtree_to_const_val((const_alloc.ty, valtree.unwrap()));
-    let new = mir::ConstantKind::from_value(const_val_new, ty);
-
-    if !check_const_value_eq(tcx, param_env, old, new) {
-        bug!("old const_val {:?} not equal to new const_val {:?}", const_val_old, const_val_new);
-    }
 
     Ok(valtree)
-}
-
-fn check_const_value_eq<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
-    a: mir::ConstantKind<'tcx>,
-    b: mir::ConstantKind<'tcx>,
-) -> bool {
-    match (a, b) {
-        (mir::ConstantKind::Val(a_const_val, a_ty), mir::ConstantKind::Val(b_const_val, b_ty)) => {
-            match (a_const_val, b_const_val) {
-                (
-                    ConstValue::Scalar(Scalar::Int(a_val)),
-                    ConstValue::Scalar(Scalar::Int(b_val)),
-                ) => a_val == b_val,
-                (
-                    ConstValue::Scalar(Scalar::Ptr(a_val, _a_size)),
-                    ConstValue::Scalar(Scalar::Ptr(b_val, _b_size)),
-                ) => {
-                    a_val == b_val
-                        || match (
-                            tcx.global_alloc(a_val.provenance),
-                            tcx.global_alloc(b_val.provenance),
-                        ) {
-                            (
-                                GlobalAlloc::Function(a_instance),
-                                GlobalAlloc::Function(b_instance),
-                            ) => a_instance == b_instance,
-                            _ => false,
-                        }
-                }
-
-                (ConstValue::Slice { .. }, ConstValue::Slice { .. }) => {
-                    get_slice_bytes(&tcx, a_const_val) == get_slice_bytes(&tcx, b_const_val)
-                }
-
-                (
-                    ConstValue::ByRef { alloc: alloc_a, .. },
-                    ConstValue::ByRef { alloc: alloc_b, .. },
-                ) if a.ty().is_ref() || b.ty().is_ref() => {
-                    if a.ty().is_ref() && b.ty().is_ref() {
-                        alloc_a == alloc_b
-                    } else {
-                        false
-                    }
-                }
-                (ConstValue::ByRef { .. }, ConstValue::ByRef { .. }) => {
-                    let a_destructured = tcx.destructure_mir_constant(param_env.and(a));
-                    let b_destructured = tcx.destructure_mir_constant(param_env.and(b));
-
-                    // Both the variant and each field have to be equal.
-                    if a_destructured.variant == b_destructured.variant {
-                        for (a_field, b_field) in
-                            iter::zip(a_destructured.fields, b_destructured.fields)
-                        {
-                            if !check_const_value_eq(tcx, param_env, *a_field, *b_field) {
-                                return false;
-                            }
-                        }
-
-                        true
-                    } else {
-                        false
-                    }
-                }
-
-                _ => false,
-            }
-        }
-        _ => {
-            bug!("expected concrete values, found: a: {:?}, b: {:?}", a, b);
-        }
-    }
 }
 
 /// Tries to destructure constants of type Array or Adt into the constants
