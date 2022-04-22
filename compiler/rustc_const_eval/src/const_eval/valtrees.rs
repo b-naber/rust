@@ -98,10 +98,6 @@ pub(crate) fn const_to_valtree_inner<'tcx>(
             }
 
             let variant = ecx.read_discriminant(&place.into()).unwrap().1;
-<<<<<<< HEAD
-=======
-
->>>>>>> 05d7cc83287 (test for correctness of valtree -> constval conversion FAILS)
             branches(ecx, place, def.variant(variant).fields.len(), def.is_enum().then_some(variant))
         }
 
