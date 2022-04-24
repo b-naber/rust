@@ -13,6 +13,7 @@ use crate::mir::{
 };
 use crate::thir::Thir;
 use crate::traits;
+use crate::ty::fold::TypeFoldable;
 use crate::ty::query::{self, TyCtxtAt};
 use crate::ty::subst::{GenericArg, GenericArgKind, InternalSubsts, Subst, SubstsRef, UserSubsts};
 use crate::ty::TyKind::*;
@@ -70,7 +71,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter;
 use std::mem;
-use std::ops::{Bound, Deref};
+use std::ops::{Bound, ControlFlow, Deref};
 use std::sync::Arc;
 
 pub trait OnDiskCache<'tcx>: rustc_data_structures::sync::Sync {

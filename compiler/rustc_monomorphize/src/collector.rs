@@ -739,9 +739,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
         let val = match literal {
             mir::ConstantKind::Val(val, _) => val,
             mir::ConstantKind::Ty(ct) => match ct.val() {
-                ty::ConstKind::Value(val) => {
-                    bug!("should not be encountering a type-level constant value here")
-                }
+                ty::ConstKind::Value(val) => self.tcx.valtree_to_const_val((ct.ty(), val)),
                 ty::ConstKind::Unevaluated(ct) => {
                     debug!(?ct);
                     let param_env = ty::ParamEnv::reveal_all();
@@ -772,7 +770,8 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
 
         match substituted_constant.val() {
             ty::ConstKind::Value(val) => {
-                bug!("should not be encountering type-level constant value here")
+                let const_val = self.tcx.valtree_to_const_val((constant.ty(), val));
+                collect_const_value(self.tcx, const_val, self.output)
             }
             ty::ConstKind::Unevaluated(unevaluated) => {
                 match self.tcx.const_eval_resolve(param_env, unevaluated, None) {

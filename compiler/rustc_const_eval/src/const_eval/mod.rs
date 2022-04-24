@@ -63,9 +63,9 @@ pub(crate) fn eval_to_valtree<'tcx>(
 
     let valtree = const_to_valtree_inner(&ecx, &place);
 
-    let ty = const_alloc.ty;
-    let const_val_old = turn_into_const_value(tcx, const_alloc, param_env.and(cid));
-    let const_val_new = tcx.valtree_to_const_val((const_alloc.ty, valtree.unwrap()));
+    //let ty = const_alloc.ty;
+    //let const_val_old = turn_into_const_value(tcx, const_alloc, param_env.and(cid));
+    //debug!(?const_val_old);
 
     Ok(valtree)
 }

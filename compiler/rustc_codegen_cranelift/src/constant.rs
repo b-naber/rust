@@ -468,9 +468,11 @@ pub(crate) fn mir_operand_get_const_val<'tcx>(
 ) -> Option<ConstValue<'tcx>> {
     match operand {
         Operand::Constant(const_) => match const_.literal {
-            ConstantKind::Ty(const_) => {
-                fx.monomorphize(const_).eval(fx.tcx, ParamEnv::reveal_all()).val().try_to_value()
-            }
+            ConstantKind::Ty(const_) => fx
+                .monomorphize(const_)
+                .eval(fx.tcx, ParamEnv::reveal_all())
+                .val()
+                .try_to_value(self.tcx),
             ConstantKind::Val(val, _) => Some(val),
         },
         // FIXME(rust-lang/rust#85105): Casts like `IMM8 as u32` result in the const being stored

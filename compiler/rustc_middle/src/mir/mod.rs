@@ -2921,10 +2921,10 @@ impl<'tcx> ConstantKind<'tcx> {
     }
 
     #[inline]
-    pub fn try_to_value(self) -> Option<interpret::ConstValue<'tcx>> {
+    pub fn try_to_value(self, tcx: TyCtxt<'tcx>) -> Option<interpret::ConstValue<'tcx>> {
         match self {
             ConstantKind::Ty(c) => match c.val() {
-                ty::ConstKind::Value(valtree) => bug!("should not encounter valtree here"),
+                ty::ConstKind::Value(valtree) => Some(tcx.valtree_to_const_val((c.ty(), valtree))),
                 _ => None,
             },
             ConstantKind::Val(val, _) => Some(val),
@@ -2933,12 +2933,21 @@ impl<'tcx> ConstantKind<'tcx> {
 
     #[inline]
     pub fn try_to_scalar(self) -> Option<Scalar> {
-        self.try_to_value()?.try_to_scalar()
+        match self {
+            ConstantKind::Ty(c) => match c.val() {
+                ty::ConstKind::Value(valtree) => match valtree {
+                    ty::ValTree::Leaf(scalar_int) => Some(Scalar::Int(scalar_int)),
+                    ty::ValTree::Branch(_) => None,
+                },
+                _ => None,
+            },
+            ConstantKind::Val(val, _) => val.try_to_scalar(),
+        }
     }
 
     #[inline]
     pub fn try_to_scalar_int(self) -> Option<ScalarInt> {
-        Some(self.try_to_value()?.try_to_scalar()?.assert_int())
+        Some(self.try_to_scalar()?.assert_int())
     }
 
     #[inline]

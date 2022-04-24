@@ -38,7 +38,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                     self.cx.tcx().sess.span_err(constant.span, "erroneous constant encountered");
                     err
                 }),
-            ty::ConstKind::Value(_) => bug!("type-level constant values shouldn't occur here"),
+            ty::ConstKind::Value(val) => Ok(self.cx.tcx().valtree_to_const_val((ct.ty(), val))),
             err => span_bug!(
                 constant.span,
                 "encountered bad ConstKind after monomorphizing: {:?}",
