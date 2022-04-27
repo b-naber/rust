@@ -44,7 +44,7 @@ pub fn provide(providers: &mut Providers) {
     providers.const_caller_location = const_eval::const_caller_location;
     providers.try_destructure_const = |tcx, param_env_and_value| {
         let (param_env, value) = param_env_and_value.into_parts();
-        const_eval::try_destructure_const(tcx, param_env, value).ok()
+        const_eval::try_destructure_const(tcx, param_env, value)
     };
     providers.destructure_mir_constant = |tcx, param_env_and_value| {
         let (param_env, value) = param_env_and_value.into_parts();
@@ -58,8 +58,9 @@ pub fn provide(providers: &mut Providers) {
         let (param_env, value) = param_env_and_value.into_parts();
         const_eval::destructure_mir_constant(tcx, param_env, value)
     };
-    providers.valtree_to_const_val =
-        |tcx, (ty, valtree)| const_eval::valtree_to_const_value(tcx, ty, valtree);
+    providers.valtree_to_const_val = |tcx, (ty, valtree)| {
+        const_eval::valtree_to_const_value(tcx, ParamEnv::empty().and(ty), valtree)
+    };
     providers.try_destructure_const = |tcx, (param_env_and_const)| {
         let (param_env, _const) = param_env_and_const.into_parts();
         const_eval::try_destructure_const(tcx, param_env, _const)

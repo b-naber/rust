@@ -958,17 +958,6 @@ rustc_queries! {
         remap_env_constness
     }
 
-    query try_destructure_const(key: ty::ParamEnvAnd<'tcx, ty::Const<'tcx>>) -> Option<mir::DestructuredConst<'tcx>> {
-        desc { "destructure type-level constant"}
-    }
-
-    /// Destructure an `mir::ConstantKind` ADT or array into its variant index
-    /// and its field values.
-    query destructure_mir_constant(key: ty::ParamEnvAnd<'tcx, mir::ConstantKind<'tcx>>) -> mir::DestructuredMirConstant<'tcx> {
-        desc { "destructure mir constant"}
-        remap_env_constness
-    }
-
     /// Dereference a constant reference or raw pointer and turn the result into a constant
     /// again.
     query deref_const(
