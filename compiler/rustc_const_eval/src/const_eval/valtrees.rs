@@ -30,7 +30,7 @@ fn branches<'tcx>(
         let field = ecx.mplace_field(&place, i).unwrap();
         const_to_valtree_inner(ecx, &field)
     });
-    // For enums, we prepend their variant index before the variant's fields so we can figure out
+    // For enums, we preped their variant index before the variant's fields so we can figure out
     // the variant again when just seeing a valtree.
     let branches = variant.into_iter().chain(fields);
     Some(ty::ValTree::Branch(ecx.tcx.arena.alloc_from_iter(branches.collect::<Option<Vec<_>>>()?)))
@@ -51,7 +51,7 @@ fn slice_branches<'tcx>(
 }
 
 #[instrument(skip(ecx), level = "debug")]
-pub(crate) fn const_to_valtree_inner<'tcx>(
+fn const_to_valtree_inner<'tcx>(
     ecx: &CompileTimeEvalContext<'tcx, 'tcx>,
     place: &MPlaceTy<'tcx>,
 ) -> Option<ty::ValTree<'tcx>> {
@@ -221,7 +221,7 @@ fn create_pointee_place<'tcx>(
 #[instrument(skip(tcx), level = "debug")]
 pub fn valtree_to_const_value<'tcx>(
     tcx: TyCtxt<'tcx>,
-    ty: Ty<'tcx>,
+    param_env_ty: ty::ParamEnvAnd<'tcx, Ty<'tcx>>,
     valtree: ty::ValTree<'tcx>,
 ) -> ConstValue<'tcx> {
     // Basic idea: We directly construct `Scalar` values from trivial `ValTree`s
@@ -231,8 +231,8 @@ pub fn valtree_to_const_value<'tcx>(
     // create inner `MPlace`s which are filled recursively.
     // FIXME Does this need an example?
 
-    let mut ecx = mk_eval_cx(tcx, DUMMY_SP, ty::ParamEnv::empty(), false);
-    let param_env_ty = ty::ParamEnv::empty().and(ty);
+    let (param_env, ty) = param_env_ty.into_parts();
+    let mut ecx = mk_eval_cx(tcx, DUMMY_SP, param_env, false);
 
     match ty.kind() {
         ty::FnDef(..) => {
