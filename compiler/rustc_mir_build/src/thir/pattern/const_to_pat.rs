@@ -257,6 +257,7 @@ impl<'a, 'tcx> ConstToPat<'a, 'tcx> {
     }
 
     // Recursive helper for `to_pat`; invoke that (instead of calling this directly).
+    #[instrument(skip(self), level = "debug")]
     fn recur(
         &self,
         cv: ty::Const<'tcx>,

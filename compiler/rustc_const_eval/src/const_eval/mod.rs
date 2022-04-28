@@ -72,6 +72,7 @@ pub(crate) fn eval_to_valtree<'tcx>(
 
 /// Tries to destructure constants of type Array or Adt into the constants
 /// of its fields.
+#[instrument(skip(tcx), level = "debug")]
 pub(crate) fn try_destructure_const<'tcx>(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
@@ -79,8 +80,10 @@ pub(crate) fn try_destructure_const<'tcx>(
 ) -> Option<mir::DestructuredConst<'tcx>> {
     if let ty::ConstKind::Value(valtree) = _const.val() {
         let branches = valtree.unwrap_branch();
+        let ty_kind = _const.ty().kind();
+        debug!(?ty_kind);
 
-        let (fields, variant) = match _const.ty().kind() {
+        let (fields, variant) = match ty_kind {
             ty::Array(inner_ty, _) => {
                 // construct the consts for the elements of the array
                 let field_consts = branches
@@ -94,7 +97,7 @@ pub(crate) fn try_destructure_const<'tcx>(
                 (field_consts, None)
             }
             ty::Adt(def, _) if def.variants().is_empty() => bug!("unreachable"),
-            ty::Adt(def, substs) if def.is_enum() => {
+            ty::Adt(def, substs) => {
                 let variant_idx = if def.is_enum() {
                     VariantIdx::from_u32(branches[0].unwrap_leaf().try_to_u32().unwrap())
                 } else {
@@ -103,11 +106,11 @@ pub(crate) fn try_destructure_const<'tcx>(
                 let fields = &def.variant(variant_idx).fields;
                 let mut field_consts = vec![];
 
-                // Note: First element inValTree corresponds to variant of enum
+                // Note: First element in ValTree corresponds to variant of enum
                 let mut valtree_idx = if def.is_enum() { 1 } else { 0 };
                 for field in fields {
                     let field_ty = field.ty(tcx, substs);
-                    let field_valtree = branches[valtree_idx]; // first element of branches is variant
+                    let field_valtree = branches[valtree_idx];
                     let field_const = tcx.mk_const(ty::ConstS {
                         val: ty::ConstKind::Value(field_valtree),
                         ty: field_ty,
@@ -118,6 +121,17 @@ pub(crate) fn try_destructure_const<'tcx>(
                 debug!(?field_consts);
 
                 (field_consts, Some(variant_idx))
+            }
+            ty::Tuple(inner_tys) => {
+                // construct the consts for the elements of the tuple
+                let field_consts = inner_tys
+                    .iter()
+                    .zip(branches.iter())
+                    .map(|(t, b)| tcx.mk_const(ty::ConstS { val: ty::ConstKind::Value(*b), ty: t }))
+                    .collect::<Vec<_>>();
+                debug!(?field_consts);
+
+                (field_consts, None)
             }
             _ => bug!("cannot destructure constant {:?}", _const.val()),
         };
