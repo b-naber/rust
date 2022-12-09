@@ -26,12 +26,10 @@ use rustc_middle::ty::{
     self, DefIdTree, InlineConstSubsts, InlineConstSubstsParts, RegionVid, Ty, TyCtxt,
 };
 use rustc_middle::ty::{InternalSubsts, SubstsRef};
-#[cfg(debug_assertions)]
 use rustc_span::Symbol;
 use std::iter;
 
 use crate::nll::ToRegionVid;
-#[cfg(debug_assertions)]
 use crate::renumber::{BoundRegionInfo, RegionCtxt};
 use crate::BorrowckInferCtxt;
 
@@ -405,9 +403,6 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
         assert_eq!(FIRST_GLOBAL_INDEX, self.infcx.num_region_vars());
 
         // Create the "global" region that is always free in all contexts: 'static.
-        #[cfg(not(debug_assertions))]
-        let fr_static = self.infcx.next_nll_region_var(FR).to_region_vid();
-        #[cfg(debug_assertions)]
         let fr_static = self
             .infcx
             .next_nll_region_var(FR, RegionCtxt::Free(Symbol::intern("static")))
@@ -443,10 +438,6 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
                 |r| {
                     debug!(?r);
                     if !indices.indices.contains_key(&r) {
-                        #[cfg(not(debug_assertions))]
-                        let region_vid = self.infcx.next_nll_region_var(FR);
-
-                        #[cfg(debug_assertions)]
                         let region_vid = {
                             let name = match r.get_name() {
                                 Some(name) => name,
@@ -486,10 +477,6 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
         for_each_late_bound_region_in_item(self.infcx.tcx, self.mir_def.did, |r| {
             debug!(?r);
             if !indices.indices.contains_key(&r) {
-                #[cfg(not(debug_assertions))]
-                let region_vid = self.infcx.next_nll_region_var(FR);
-
-                #[cfg(debug_assertions)]
                 let region_vid = {
                     let name = match r.get_name() {
                         Some(name) => name,
@@ -517,9 +504,6 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
                     Some(self.infcx.tcx.def_span(self.mir_def.did)),
                 );
 
-                #[cfg(not(debug_assertions))]
-                let reg_vid = self.infcx.next_nll_region_var(FR).to_region_vid();
-                #[cfg(debug_assertions)]
                 let reg_vid = self
                     .infcx
                     .next_nll_region_var(FR, RegionCtxt::Free(Symbol::intern("c-variadic")))
@@ -538,9 +522,6 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
             }
         }
 
-        #[cfg(not(debug_assertions))]
-        let fr_fn_body = self.infcx.next_nll_region_var(FR).to_region_vid();
-        #[cfg(debug_assertions)]
         let fr_fn_body = self
             .infcx
             .next_nll_region_var(FR, RegionCtxt::Free(Symbol::intern("fn_body")))
@@ -773,19 +754,6 @@ trait InferCtxtExt<'tcx> {
 }
 
 impl<'cx, 'tcx> InferCtxtExt<'tcx> for BorrowckInferCtxt<'cx, 'tcx> {
-    #[cfg(not(debug_assertions))]
-    fn replace_free_regions_with_nll_infer_vars<T>(
-        &self,
-        origin: NllRegionVariableOrigin,
-        value: T,
-    ) -> T
-    where
-        T: TypeFoldable<'tcx>,
-    {
-        self.tcx.fold_regions(value, |_region, _depth| self.infcx.next_nll_region_var(origin))
-    }
-
-    #[cfg(debug_assertions)]
     #[instrument(skip(self), level = "debug")]
     fn replace_free_regions_with_nll_infer_vars<T>(
         &self,
@@ -826,10 +794,6 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for BorrowckInferCtxt<'cx, 'tcx> {
                 bound_region: br.kind,
             }));
 
-            #[cfg(not(debug_assertions))]
-            let region_vid = self.next_nll_region_var(origin);
-
-            #[cfg(debug_assertions)]
             let region_vid = {
                 let name = match br.kind.get_name() {
                     Some(name) => name,
@@ -864,10 +828,6 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for BorrowckInferCtxt<'cx, 'tcx> {
         for_each_late_bound_region_in_recursive_scope(self.tcx, mir_def_id, |r| {
             debug!(?r);
             if !indices.indices.contains_key(&r) {
-                #[cfg(not(debug_assertions))]
-                let region_vid = self.next_nll_region_var(FR);
-
-                #[cfg(debug_assertions)]
                 let region_vid = {
                     let name = match r.get_name() {
                         Some(name) => name,
@@ -892,10 +852,6 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for BorrowckInferCtxt<'cx, 'tcx> {
         for_each_late_bound_region_in_item(self.tcx, mir_def_id, |r| {
             debug!(?r);
             if !indices.indices.contains_key(&r) {
-                #[cfg(not(debug_assertions))]
-                let region_vid = self.next_nll_region_var(FR);
-
-                #[cfg(debug_assertions)]
                 let region_vid = {
                     let name = match r.get_name() {
                         Some(name) => name,
