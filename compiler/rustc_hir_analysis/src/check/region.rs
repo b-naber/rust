@@ -85,6 +85,7 @@ fn record_var_lifetime(
     }
 }
 
+#[instrument(skip(visitor), level = "debug")]
 fn resolve_block<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, blk: &'tcx hir::Block<'tcx>) {
     debug!("resolve_block(blk.hir_id={:?})", blk.hir_id);
 
@@ -172,6 +173,7 @@ fn resolve_block<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, blk: &'tcx h
     visitor.cx = prev_cx;
 }
 
+#[instrument(skip(visitor), level = "debug")]
 fn resolve_arm<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, arm: &'tcx hir::Arm<'tcx>) {
     let prev_cx = visitor.cx;
 
@@ -189,6 +191,7 @@ fn resolve_arm<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, arm: &'tcx hir
     visitor.cx = prev_cx;
 }
 
+#[instrument(skip(visitor), level = "debug")]
 fn resolve_pat<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, pat: &'tcx hir::Pat<'tcx>) {
     visitor.record_child_scope(Scope { id: pat.hir_id.local_id, data: ScopeData::Node });
 
@@ -206,6 +209,7 @@ fn resolve_pat<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, pat: &'tcx hir
     debug!("resolve_pat - post-increment {} pat = {:?}", visitor.expr_and_pat_count, pat);
 }
 
+#[instrument(skip(visitor), level = "debug")]
 fn resolve_stmt<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, stmt: &'tcx hir::Stmt<'tcx>) {
     let stmt_id = stmt.hir_id.local_id;
     debug!("resolve_stmt(stmt.id={:?})", stmt_id);
@@ -225,6 +229,7 @@ fn resolve_stmt<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, stmt: &'tcx h
     visitor.cx.parent = prev_parent;
 }
 
+#[instrument(skip(visitor), level = "debug")]
 fn resolve_expr<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, expr: &'tcx hir::Expr<'tcx>) {
     debug!("resolve_expr - pre-increment {} expr = {:?}", visitor.expr_and_pat_count, expr);
 
@@ -512,6 +517,7 @@ fn resolve_expr<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, expr: &'tcx h
     visitor.cx = prev_cx;
 }
 
+#[instrument(skip(visitor), level = "debug")]
 fn resolve_local<'tcx>(
     visitor: &mut RegionResolutionVisitor<'tcx>,
     pat: Option<&'tcx hir::Pat<'tcx>>,
@@ -614,6 +620,7 @@ fn resolve_local<'tcx>(
     ///        | ... "|" P& "|" ...
     ///        | box P&
     /// ```
+    #[instrument(level = "debug")]
     fn is_binding_pat(pat: &hir::Pat<'_>) -> bool {
         // Note that the code below looks for *explicit* refs only, that is, it won't
         // know about *implicit* refs as introduced in #42640.
@@ -678,6 +685,7 @@ fn resolve_local<'tcx>(
     ///        | E& as ...
     ///        | ( E& )
     /// ```
+    #[instrument(skip(visitor), level = "debug")]
     fn record_rvalue_scope_if_borrow_expr<'tcx>(
         visitor: &mut RegionResolutionVisitor<'tcx>,
         expr: &hir::Expr<'_>,
@@ -728,6 +736,7 @@ fn resolve_local<'tcx>(
 impl<'tcx> RegionResolutionVisitor<'tcx> {
     /// Records the current parent (if any) as the parent of `child_scope`.
     /// Returns the depth of `child_scope`.
+    #[instrument(skip(self), level = "debug")]
     fn record_child_scope(&mut self, child_scope: Scope) -> ScopeDepth {
         let parent = self.cx.parent;
         self.scope_tree.record_scope_parent(child_scope, parent);
@@ -738,16 +747,19 @@ impl<'tcx> RegionResolutionVisitor<'tcx> {
 
     /// Records the current parent (if any) as the parent of `child_scope`,
     /// and sets `child_scope` as the new current parent.
+    #[instrument(skip(self), level = "debug")]
     fn enter_scope(&mut self, child_scope: Scope) {
         let child_depth = self.record_child_scope(child_scope);
         self.cx.parent = Some((child_scope, child_depth));
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn enter_node_scope_with_dtor(&mut self, id: hir::ItemLocalId) {
         // If node was previously marked as a terminating scope during the
         // recursive visit of its parent node in the AST, then we need to
         // account for the destruction scope representing the scope of
         // the destructors that run immediately after it completes.
+        debug!("terminating scopes: {:#?}", self.terminating_scopes);
         if self.terminating_scopes.contains(&id) {
             self.enter_scope(Scope { id, data: ScopeData::Destruction });
         }
@@ -760,9 +772,12 @@ impl<'tcx> Visitor<'tcx> for RegionResolutionVisitor<'tcx> {
         resolve_block(self, b);
     }
 
+    #[instrument(skip(self, body), level = "debug")]
     fn visit_body(&mut self, body: &'tcx hir::Body<'tcx>) {
         let body_id = body.id();
         let owner_id = self.tcx.hir().body_owner_def_id(body_id);
+
+        debug!("body: {:#?}", body);
 
         debug!(
             "visit_body(id={:?}, span={:?}, body.id={:?}, cx.parent={:?})",
@@ -791,6 +806,7 @@ impl<'tcx> Visitor<'tcx> for RegionResolutionVisitor<'tcx> {
         // The arguments and `self` are parented to the fn.
         self.cx.var_parent = self.cx.parent.take();
         for param in body.params {
+            debug!(?param);
             self.visit_pat(&param.pat);
         }
 

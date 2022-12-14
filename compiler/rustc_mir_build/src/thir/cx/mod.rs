@@ -25,6 +25,7 @@ pub(crate) fn thir_body<'tcx>(
     let hir = tcx.hir();
     let body = hir.body(hir.body_owned_by(owner_def.did));
     let mut cx = Cx::new(tcx, owner_def);
+    debug!("region_scope_tree: {:#?}", cx.region_scope_tree);
     if let Some(reported) = cx.typeck_results.tainted_by_errors {
         return Err(reported);
     }

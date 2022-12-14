@@ -428,13 +428,19 @@ macro_rules! unpack {
 
 ///////////////////////////////////////////////////////////////////////////
 /// the main entry point for building MIR for a function
-
+#[instrument(skip(tcx, thir), level = "debug")]
 fn construct_fn<'tcx>(
     tcx: TyCtxt<'tcx>,
     fn_def: ty::WithOptConstParam<LocalDefId>,
     thir: &Thir<'tcx>,
     expr: ExprId,
 ) -> Body<'tcx> {
+    debug!("blocks: {:#?}", thir.blocks);
+    debug!("arms: {:#?}", thir.arms);
+    debug!("stmts: {:#?}", thir.stmts);
+    for (i, e) in thir.exprs.iter().enumerate() {
+        debug!("i: {:?}, e: {:?}", i, e);
+    }
     let span = tcx.def_span(fn_def.did);
     let fn_id = tcx.hir().local_def_id_to_hir_id(fn_def.did);
     let generator_kind = tcx.generator_kind(fn_def.did);
@@ -779,6 +785,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         )
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn args_and_body(
         &mut self,
         mut block: BasicBlock,
@@ -789,6 +796,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
     ) -> BlockAnd<()> {
         // Allocate locals for the function arguments
         for param in arguments.iter() {
+            debug!(?param);
             let source_info =
                 SourceInfo::outermost(param.pat.as_ref().map_or(self.fn_span, |pat| pat.span));
             let arg_local =
@@ -874,6 +882,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             // Function arguments always get the first Local indices after the return place
             let local = Local::new(index + 1);
             let place = Place::from(local);
+            debug!(?param, ?place);
 
             // Make sure we drop (parts of) the argument even when not matched on.
             self.schedule_drop(

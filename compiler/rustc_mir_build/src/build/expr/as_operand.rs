@@ -124,6 +124,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             }
             Category::Constant | Category::Place | Category::Rvalue(..) => {
                 let operand = unpack!(block = this.as_temp(block, scope, expr, Mutability::Mut));
+                debug!(?operand);
                 if this.local_decls[operand].local_info.is_none() {
                     this.local_decls[operand].local_info = local_info;
                 }

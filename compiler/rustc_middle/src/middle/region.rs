@@ -334,6 +334,7 @@ pub struct YieldData {
 }
 
 impl ScopeTree {
+    #[instrument(skip(self), level = "debug")]
     pub fn record_scope_parent(&mut self, child: Scope, parent: Option<(Scope, ScopeDepth)>) {
         debug!("{:?}.parent = {:?}", child, parent);
 
@@ -348,16 +349,20 @@ impl ScopeTree {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub fn opt_destruction_scope(&self, n: hir::ItemLocalId) -> Option<Scope> {
+        debug!("destruction_scopes: {:#?}", self.destruction_scopes);
         self.destruction_scopes.get(&n).cloned()
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub fn record_var_scope(&mut self, var: hir::ItemLocalId, lifetime: Scope) {
         debug!("record_var_scope(sub={:?}, sup={:?})", var, lifetime);
         assert!(var != lifetime.item_local_id());
         self.var_map.insert(var, lifetime);
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub fn record_rvalue_candidate(
         &mut self,
         var: hir::HirId,

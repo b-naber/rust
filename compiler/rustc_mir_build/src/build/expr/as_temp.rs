@@ -10,6 +10,7 @@ use rustc_middle::thir::*;
 impl<'a, 'tcx> Builder<'a, 'tcx> {
     /// Compile `expr` into a fresh temporary. This is used when building
     /// up rvalues so as to freeze the value that will be consumed.
+    #[instrument(skip(self, expr), level = "debug")]
     pub(crate) fn as_temp(
         &mut self,
         block: BasicBlock,
@@ -17,6 +18,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         expr: &Expr<'tcx>,
         mutability: Mutability,
     ) -> BlockAnd<Local> {
+        debug!("expr: {:#?}", expr);
+        debug!(?temp_lifetime);
         // this is the only place in mir building that we need to truly need to worry about
         // infinite recursion. Everything else does recurse, too, but it always gets broken up
         // at some point by inserting an intermediate temporary
@@ -32,6 +35,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         mutability: Mutability,
     ) -> BlockAnd<Local> {
         let this = self;
+        debug!("scopes: {:#?}", this.scopes);
 
         let expr_span = expr.span;
         let source_info = this.source_info(expr_span);

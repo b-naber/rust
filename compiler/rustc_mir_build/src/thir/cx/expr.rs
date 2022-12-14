@@ -33,8 +33,10 @@ impl<'tcx> Cx<'tcx> {
 
     #[instrument(level = "trace", skip(self, hir_expr))]
     pub(super) fn mirror_expr_inner(&mut self, hir_expr: &'tcx hir::Expr<'tcx>) -> ExprId {
+        debug!("hir_expr: {:#?}", hir_expr);
         let temp_lifetime =
             self.rvalue_scopes.temporary_scope(self.region_scope_tree, hir_expr.hir_id.local_id);
+        debug!(?temp_lifetime);
         let expr_scope =
             region::Scope { id: hir_expr.hir_id.local_id, data: region::ScopeData::Node };
 
@@ -262,12 +264,14 @@ impl<'tcx> Cx<'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn make_mirror_unadjusted(&mut self, expr: &'tcx hir::Expr<'tcx>) -> Expr<'tcx> {
         let tcx = self.tcx;
         let expr_ty = self.typeck_results().expr_ty(expr);
         let expr_span = expr.span;
         let temp_lifetime =
             self.rvalue_scopes.temporary_scope(self.region_scope_tree, expr.hir_id.local_id);
+        debug!(?temp_lifetime);
 
         let kind = match expr.kind {
             // Here comes the interesting stuff:

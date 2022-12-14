@@ -15,13 +15,14 @@ use std::iter;
 impl<'a, 'tcx> Builder<'a, 'tcx> {
     /// Compile `expr`, storing the result into `destination`, which
     /// is assumed to be uninitialized.
-    #[instrument(level = "debug", skip(self))]
+    #[instrument(level = "debug", skip(self, expr))]
     pub(crate) fn expr_into_dest(
         &mut self,
         destination: Place<'tcx>,
         mut block: BasicBlock,
         expr: &Expr<'tcx>,
     ) -> BlockAnd<()> {
+        debug!("expr: {:#?}", expr);
         // since we frequently have to reference `self` from within a
         // closure, where `self` would be shadowed, it's easier to
         // just use the name `this` uniformly
@@ -56,6 +57,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 let then_expr = &this.thir[then];
                 let then_source_info = this.source_info(then_expr.span);
                 let condition_scope = this.local_scope();
+                debug!(?condition_scope);
 
                 let mut else_blk = unpack!(
                     then_blk = this.in_scope(
