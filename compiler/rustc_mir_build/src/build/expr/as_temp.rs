@@ -35,8 +35,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         mutability: Mutability,
     ) -> BlockAnd<Local> {
         let this = self;
-        debug!("scopes: {:#?}", this.scopes);
-
+        debug!("label_block_expr_scope: {:?}", this.scopes.label_block_expr_scope);
         let expr_span = expr.span;
         let source_info = this.source_info(expr_span);
         if let ExprKind::Scope { region_scope, lint_level, value } = expr.kind {

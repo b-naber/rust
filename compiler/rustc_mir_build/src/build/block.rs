@@ -4,6 +4,7 @@ use rustc_middle::middle::region::Scope;
 use rustc_middle::thir::*;
 use rustc_middle::{mir::*, ty};
 use rustc_span::Span;
+use std::mem;
 
 impl<'a, 'tcx> Builder<'a, 'tcx> {
     #[instrument(skip(self), level = "debug")]
@@ -36,6 +37,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                             expr,
                             safety_mode,
                             region_scope,
+                            true,
                         ))
                     })
                 } else {
@@ -47,6 +49,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         expr,
                         safety_mode,
                         region_scope,
+                        false,
                     )
                 }
             })
@@ -62,6 +65,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         expr: Option<&Expr<'tcx>>,
         safety_mode: BlockSafety,
         region_scope: Scope,
+        // TO-DO: enum instead of bool
+        label_block: bool,
     ) -> BlockAnd<()> {
         let this = self;
 
@@ -363,9 +368,19 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             this.block_context
                 .push(BlockFrame::TailExpr { tail_result_is_ignored, span: expr.span });
 
-            unpack!(block = this.expr_into_dest(destination, block, expr));
-            let popped = this.block_context.pop();
+            // Set a new inner-most label block scope that allows us to track the `breaks`
+            // in that block.
+            if label_block {
+                let prev_scope =
+                    mem::replace(&mut this.scopes.label_block_expr_scope, Some(vec![]));
 
+                unpack!(block = this.expr_into_dest(destination, block, expr));
+                this.scopes.label_block_expr_scope = prev_scope;
+            } else {
+                unpack!(block = this.expr_into_dest(destination, block, expr));
+            }
+
+            let popped = this.block_context.pop();
             assert!(popped.map_or(false, |bf| bf.is_tail_expr()));
         } else {
             // If a block has no trailing expression, then it is given an implicit return type.

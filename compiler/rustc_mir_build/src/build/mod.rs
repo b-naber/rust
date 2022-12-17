@@ -367,6 +367,7 @@ impl LocalsForNode {
     }
 }
 
+#[derive(Debug)]
 struct CFG<'tcx> {
     basic_blocks: IndexVec<BasicBlock, BasicBlockData<'tcx>>,
 }

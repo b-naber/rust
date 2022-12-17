@@ -1,4 +1,4 @@
-use crate::build::scope::BreakableTarget;
+use crate::build::scope::{BreakIdx, BreakableTarget};
 use crate::build::{BlockAnd, BlockAndExtension, BlockFrame, Builder};
 use rustc_middle::middle::region;
 use rustc_middle::mir::*;
@@ -90,12 +90,20 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             ExprKind::Continue { label } => {
                 this.break_scope(block, None, BreakableTarget::Continue(label), source_info)
             }
-            ExprKind::Break { label, value } => this.break_scope(
-                block,
-                value.map(|value| &this.thir[value]),
-                BreakableTarget::Break(label),
-                source_info,
-            ),
+            ExprKind::Break { label, value } => {
+                debug!("scopes.label_block_expr_scope: {:?}", this.scopes.label_block_expr_scope);
+                if let Some(ref mut scope) = this.scopes.label_block_expr_scope {
+                    let break_idx = BreakIdx::new(scope.len());
+                    scope.push(break_idx);
+                };
+
+                this.break_scope(
+                    block,
+                    value.map(|value| &this.thir[value]),
+                    BreakableTarget::Break(label),
+                    source_info,
+                )
+            }
             ExprKind::Return { value } => this.break_scope(
                 block,
                 value.map(|value| &this.thir[value]),

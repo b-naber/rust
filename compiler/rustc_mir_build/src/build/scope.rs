@@ -98,10 +98,13 @@ pub struct Scopes<'tcx> {
     scopes: Vec<Scope>,
 
     /// The current set of breakable scopes. See module comment for more details.
-    breakable_scopes: Vec<BreakableScope<'tcx>>,
+    pub(crate) breakable_scopes: Vec<BreakableScope<'tcx>>,
 
     /// The scope of the innermost if-then currently being lowered.
     if_then_scope: Option<IfThenScope>,
+
+    /// Tracks the `BreakIdx`s of the innermost breakscope.
+    pub(crate) label_block_expr_scope: Option<Vec<BreakIdx>>,
 
     /// Drops that need to be done on unwind paths. See the comment on
     /// [DropTree] for more details.
@@ -134,9 +137,11 @@ struct Scope {
     /// The drop index that will drop everything in and below this scope on a
     /// generator drop path.
     cached_generator_drop_block: Option<DropIdx>,
+
+    break_idx: Option<BreakIdx>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct DropData {
     /// The `Span` where drop obligation was incurred (typically where place was
     /// declared)
@@ -147,6 +152,8 @@ struct DropData {
 
     /// Whether this is a value Drop or a StorageDead.
     kind: DropKind,
+
+    break_idx: Option<BreakIdx>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -155,8 +162,17 @@ pub(crate) enum DropKind {
     Storage,
 }
 
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
+pub(crate) struct BreakIdx(usize);
+
+impl BreakIdx {
+    pub(crate) fn new(idx: usize) -> Self {
+        BreakIdx(idx)
+    }
+}
+
 #[derive(Debug)]
-struct BreakableScope<'tcx> {
+pub(crate) struct BreakableScope<'tcx> {
     /// Region scope of the loop
     region_scope: region::Scope,
     /// The destination of the loop/block expression itself (i.e., where to put
@@ -208,7 +224,7 @@ struct DropTree {
     /// `previous_drops[(drops[i].1, drops[i].0.local, drops[i].0.kind)] == i`
     previous_drops: FxHashMap<(DropIdx, Local, DropKind), DropIdx>,
     /// Edges into the `DropTree` that need to be added once it's lowered.
-    entry_points: Vec<(DropIdx, BasicBlock)>,
+    entry_points: Vec<(DropIdx, BasicBlock, Option<BreakIdx>)>,
 }
 
 impl Scope {
@@ -255,8 +271,12 @@ impl DropTree {
         // represents the block in the tree that should be jumped to once all
         // of the required drops have been performed.
         let fake_source_info = SourceInfo::outermost(DUMMY_SP);
-        let fake_data =
-            DropData { source_info: fake_source_info, local: Local::MAX, kind: DropKind::Storage };
+        let fake_data = DropData {
+            source_info: fake_source_info,
+            local: Local::MAX,
+            kind: DropKind::Storage,
+            break_idx: None,
+        };
         let drop_idx = DropIdx::MAX;
         let drops = IndexVec::from_elem_n((fake_data, drop_idx), 1);
         Self { drops, entry_points: Vec::new(), previous_drops: FxHashMap::default() }
@@ -272,9 +292,9 @@ impl DropTree {
     }
 
     #[instrument(skip(self), level = "debug")]
-    fn add_entry(&mut self, from: BasicBlock, to: DropIdx) {
+    fn add_entry(&mut self, from: BasicBlock, to: DropIdx, break_idx: Option<BreakIdx>) {
         debug_assert!(to < self.drops.next_index());
-        self.entry_points.push((to, from));
+        self.entry_points.push((to, from, break_idx));
     }
 
     /// Builds the MIR for a given drop tree.
@@ -334,7 +354,10 @@ impl DropTree {
             debug!(?drop_idx, ?drop_data);
             debug!("entry points last: {:?}", entry_points.last());
             debug!("needs_block: {:#?}", needs_block);
-            if entry_points.last().map_or(false, |entry_point| entry_point.0 == drop_idx) {
+            if entry_points.last().map_or(false, |entry_point| {
+                debug!(?entry_point, ?drop_data);
+                entry_point.0 == drop_idx
+            }) {
                 let block = *blocks[drop_idx].get_or_insert_with(|| T::make_block(cfg));
                 debug!(?block);
                 needs_block[drop_idx] = Block::Own;
@@ -345,6 +368,7 @@ impl DropTree {
                     T::add_entry(cfg, entry_block, block);
                 }
             }
+
             match needs_block[drop_idx] {
                 Block::None => continue,
                 Block::Own => {
@@ -354,6 +378,7 @@ impl DropTree {
                     blocks[drop_idx] = blocks[pred];
                 }
             }
+
             if let DropKind::Value = drop_data.0.kind {
                 needs_block[drop_data.1] = Block::Own;
             } else if drop_idx != ROOT_NODE {
@@ -421,12 +446,15 @@ impl<'tcx> Scopes<'tcx> {
             scopes: Vec::new(),
             breakable_scopes: Vec::new(),
             if_then_scope: None,
+            label_block_expr_scope: None,
             unwind_drops: DropTree::new(),
             generator_drops: DropTree::new(),
         }
     }
 
     fn push_scope(&mut self, region_scope: (region::Scope, SourceInfo), vis_scope: SourceScope) {
+        let break_idx = self.try_get_break_idx();
+
         debug!("push_scope({:?})", region_scope);
         self.scopes.push(Scope {
             source_scope: vis_scope,
@@ -435,6 +463,7 @@ impl<'tcx> Scopes<'tcx> {
             moved_locals: vec![],
             cached_unwind_block: None,
             cached_generator_drop_block: None,
+            break_idx,
         });
     }
 
@@ -455,6 +484,13 @@ impl<'tcx> Scopes<'tcx> {
     /// the next scope expression.
     fn topmost(&self) -> region::Scope {
         self.scopes.last().expect("topmost_scope: no scopes present").region_scope
+    }
+
+    pub(crate) fn try_get_break_idx(&self) -> Option<BreakIdx> {
+        match self.label_block_expr_scope {
+            Some(ref breaks) => Some(BreakIdx::new(breaks.len())),
+            None => None,
+        }
     }
 }
 
@@ -487,8 +523,11 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         let normal_exit_block = f(self);
         let breakable_scope = self.scopes.breakable_scopes.pop().unwrap();
         assert!(breakable_scope.region_scope == region_scope);
+
+        debug!("about to build break_block:");
         let break_block =
-            self.build_exit_tree(breakable_scope.break_drops, region_scope, span, None);
+            self.build_exit_tree_for_break(breakable_scope.break_drops, region_scope, span, None);
+        debug!("cfg after break block: {:#?}", self.cfg);
         if let Some(drops) = breakable_scope.continue_drops {
             self.build_exit_tree(drops, region_scope, span, loop_block);
         }
@@ -695,6 +734,21 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         debug!(?region_scope);
         let scope_index = self.scopes.scope_index(region_scope, span);
         debug!(?scope_index);
+        let label_block_expr_scope = &self.scopes.label_block_expr_scope;
+        debug!(?label_block_expr_scope);
+
+        // TO-DO: Kind of sucks that we have to decrement the break_idx here to make
+        // it work with the idxs in the drops we added
+        let break_idx = self.scopes.try_get_break_idx().map(|break_idx| {
+            let idx = break_idx.0;
+            // We only get into `break_scope` if we have encountered a `break`, in which
+            // case we should have incremented the `BreakIdx`.
+            assert!(idx > 0);
+
+            BreakIdx::new(idx - 1)
+        });
+        debug!(?break_idx);
+
         let drops = if destination.is_some() {
             &mut self.scopes.breakable_scopes[break_index].break_drops
         } else {
@@ -708,8 +762,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 drop_idx = drops.add_drop(*drop, drop_idx);
             }
         }
-        drops.add_entry(block, drop_idx);
-        debug!("drops after adding: {:#?}", drops);
+
+        drops.add_entry(block, drop_idx, break_idx);
+        debug!("drops after: {:#?}", drops);
 
         // `build_drop_trees` doesn't have access to our source_info, so we
         // create a dummy terminator now. `TerminatorKind::Resume` is used
@@ -725,6 +780,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         target: region::Scope,
         source_info: SourceInfo,
     ) {
+        let break_idx = self.scopes.try_get_break_idx();
         let scope_index = self.scopes.scope_index(target, source_info.span);
         let if_then_scope = self
             .scopes
@@ -741,7 +797,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 drop_idx = drops.add_drop(*drop, drop_idx);
             }
         }
-        drops.add_entry(block, drop_idx);
+
+        drops.add_entry(block, drop_idx, break_idx);
 
         // `build_drop_trees` doesn't have access to our source_info, so we
         // create a dummy terminator now. `TerminatorKind::Resume` is used
@@ -879,6 +936,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
     // Scheduling drops
     // ================
 
+    #[instrument(skip(self), level = "debug")]
     pub(crate) fn schedule_drop_storage_and_value(
         &mut self,
         span: Span,
@@ -921,6 +979,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             }
         };
         debug!(?needs_drop);
+
+        let break_idx = self.scopes.try_get_break_idx();
 
         // When building drops, we try to cache chains of drops to reduce the
         // number of `DropTree::add_drop` calls. This, however, means that
@@ -984,7 +1044,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     source_info: SourceInfo { span: scope_end, scope: scope.source_scope },
                     local,
                     kind: drop_kind,
+                    break_idx,
                 });
+                debug!("scope.drops after push: {:#?}", scope.drops);
 
                 return;
             }
@@ -1096,6 +1158,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         let is_generator = self.generator_kind.is_some();
         for scope in &mut self.scopes.scopes[uncached_scope..=target] {
             debug!(?scope);
+            debug!("scope.break_idx: {:?}", scope.break_idx);
             for drop in &scope.drops {
                 debug!(?drop);
                 if is_generator || drop.kind == DropKind::Value {
@@ -1133,7 +1196,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         );
 
         let next_drop = self.diverge_cleanup();
-        self.scopes.unwind_drops.add_entry(start, next_drop);
+        self.scopes.unwind_drops.add_entry(start, next_drop, self.scopes.try_get_break_idx());
     }
 
     /// Sets up a path that performs all required cleanup for dropping a
@@ -1167,7 +1230,11 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             scope.cached_generator_drop_block = Some(cached_drop);
         }
 
-        self.scopes.generator_drops.add_entry(yield_block, cached_drop);
+        self.scopes.generator_drops.add_entry(
+            yield_block,
+            cached_drop,
+            self.scopes.try_get_break_idx(),
+        );
     }
 
     /// Utility function for *non*-scope code to build their own drops
@@ -1286,7 +1353,8 @@ fn build_scope_drops<'tcx>(
                     continue;
                 }
 
-                unwind_drops.add_entry(block, unwind_to);
+                // TO-DO: probably have to consider break idx here!
+                unwind_drops.add_entry(block, unwind_to, None);
 
                 let next = cfg.start_new_block();
                 debug!("next block: {:?}", next);
@@ -1313,6 +1381,46 @@ fn build_scope_drops<'tcx>(
 }
 
 impl<'a, 'tcx: 'a> Builder<'a, 'tcx> {
+    #[instrument(skip(self, drops), level = "debug")]
+    // TO-DO: This only differs from `build_exit_tree` in the way in which we link
+    // the drop tree to the unwind tree. Extract common functionality into one
+    // function.
+    fn build_exit_tree_for_break(
+        &mut self,
+        mut drops: DropTree,
+        else_scope: region::Scope,
+        span: Span,
+        continue_block: Option<BasicBlock>,
+    ) -> Option<BlockAnd<()>> {
+        debug!("drops: {:#?}", drops);
+        let mut blocks = IndexVec::from_elem(None, &drops.drops);
+        blocks[ROOT_NODE] = continue_block;
+
+        debug!("cfg before: {:#?}", self.cfg);
+        drops.build_mir::<ExitScopes>(&mut self.cfg, &mut blocks);
+        debug!("cfg after: {:#?}", self.cfg);
+
+        let is_generator = self.generator_kind.is_some();
+
+        debug!("drops: {:#?}", drops);
+        debug!("unwind drops: {:#?}", self.scopes.unwind_drops);
+
+        if let Some(break_idx) = self.scopes.try_get_break_idx() {
+            let num_breaks = break_idx.0 + 1;
+            self.link_to_unwind_drop_tree_for_breaks(
+                &blocks,
+                &drops,
+                else_scope,
+                is_generator,
+                num_breaks,
+            );
+        } else {
+            self.link_to_unwind_drop_tree(&blocks, &drops, else_scope, span, is_generator);
+        }
+
+        blocks[ROOT_NODE].map(BasicBlock::unit)
+    }
+
     /// Build a drop tree for a breakable scope.
     ///
     /// If `continue_block` is `Some`, then the tree is for `continue` inside a
@@ -1329,14 +1437,31 @@ impl<'a, 'tcx: 'a> Builder<'a, 'tcx> {
         let mut blocks = IndexVec::from_elem(None, &drops.drops);
         blocks[ROOT_NODE] = continue_block;
 
+        debug!("cfg before: {:#?}", self.cfg);
         drops.build_mir::<ExitScopes>(&mut self.cfg, &mut blocks);
+        debug!("cfg after: {:#?}", self.cfg);
+
         let is_generator = self.generator_kind.is_some();
 
         debug!("drops: {:#?}", drops);
         debug!("unwind drops: {:#?}", self.scopes.unwind_drops);
-        // Link the exit drop tree to unwind drop tree.
+
+        self.link_to_unwind_drop_tree(&blocks, &drops, else_scope, span, is_generator);
+
+        blocks[ROOT_NODE].map(BasicBlock::unit)
+    }
+
+    /// Links `drops` into the unwind path.
+    fn link_to_unwind_drop_tree(
+        &mut self,
+        blocks: &IndexVec<DropIdx, Option<BasicBlock>>,
+        drops: &DropTree,
+        target_scope: region::Scope,
+        span: Span,
+        is_generator: bool,
+    ) {
         if drops.drops.iter().any(|(drop, _)| drop.kind == DropKind::Value) {
-            let unwind_target = self.diverge_cleanup_target(else_scope, span);
+            let unwind_target = self.diverge_cleanup_target(target_scope, span);
             debug!(?unwind_target);
             let mut unwind_indices = IndexVec::from_elem_n(unwind_target, 1);
             debug!("unwind_indices: {:#?}", unwind_indices);
@@ -1363,15 +1488,146 @@ impl<'a, 'tcx: 'a> Builder<'a, 'tcx> {
                         let unwind_drop =
                             unwind_drops.add_drop(drop_data.0, unwind_indices[drop_data.1]);
                         debug!(?unwind_drop);
-                        self.scopes
-                            .unwind_drops
-                            .add_entry(blocks[drop_idx].unwrap(), unwind_indices[drop_data.1]);
+                        self.scopes.unwind_drops.add_entry(
+                            blocks[drop_idx].unwrap(),
+                            unwind_indices[drop_data.1],
+                            self.scopes.try_get_break_idx(),
+                        );
                         unwind_indices.push(unwind_drop);
                     }
                 }
             }
         }
-        blocks[ROOT_NODE].map(BasicBlock::unit)
+    }
+
+    /// Links `drops` into the unwind path.
+    ///
+    /// In contrast to `link_to_unwind_drop_tree` this method does not use the
+    /// cached drops for each scope. Instead for each encountered `BreakIdx`
+    /// we add each drop corresponding to that `BreakIdx` into the unwind path
+    /// (if not already included). This is necessary in label blocks that occur
+    /// in return expressions: locals after a `break` which aren't returned
+    /// have a lifetime scope that is equal to that of the function itself,
+    /// although they should be dropped in the scope corresponding to the
+    /// label block. This messes up caching and as a result leads to out of
+    /// place drops on unwind paths.
+    fn link_to_unwind_drop_tree_for_breaks(
+        &mut self,
+        blocks: &IndexVec<DropIdx, Option<BasicBlock>>,
+        drops: &DropTree,
+        region_scope: region::Scope,
+        is_generator: bool,
+        num_breaks: usize,
+    ) {
+        // FIXME: don't think this is necessary. need to check later
+        for s in self.scopes.scopes.iter_mut().rev() {
+            if s.region_scope == region_scope {
+                s.cached_unwind_block = None;
+                break;
+            }
+        }
+
+        debug!("blocks: {:#?}", blocks);
+        let mut cached_drop = None;
+        for idx in 0..num_breaks {
+            let break_idx = BreakIdx::new(idx);
+            debug!(?break_idx);
+            let drops_for_break = drops
+                .drops
+                .iter()
+                .filter(|(drop, _)| {
+                    if let Some(drop_break_idx) = drop.break_idx {
+                        return drop_break_idx == break_idx;
+                    }
+
+                    false
+                })
+                .collect::<Vec<_>>();
+
+            debug!("drops_for_break: {:#?}", drops_for_break);
+            if drops_for_break.iter().any(|(drop, _)| drop.kind == DropKind::Value) {
+                let mut next_unwind_target = self.get_unwind_target_for_break(break_idx);
+                debug!(?next_unwind_target);
+                for (drop_idx, drop_data) in drops_for_break.iter().enumerate().rev() {
+                    // Skip already cached drop
+                    if let Some(_) = self
+                        .scopes
+                        .unwind_drops
+                        .drops
+                        .iter()
+                        .find(|(unwind_drop, _)| *unwind_drop == drop_data.0)
+                    {
+                        continue;
+                    }
+
+                    let drop_idx = DropIdx::from_usize(drop_idx);
+                    debug!(?drop_idx, ?drop_data);
+                    debug!(?next_unwind_target);
+                    debug!("unwind drops: {:#?}", self.scopes.unwind_drops);
+                    match drop_data.0.kind {
+                        DropKind::Storage => {
+                            debug!("Storage drop");
+                            if is_generator {
+                                let unwind_drop = self
+                                    .scopes
+                                    .unwind_drops
+                                    .add_drop(drop_data.0, next_unwind_target);
+                                debug!(?unwind_drop);
+                                cached_drop = Some(unwind_drop);
+                                next_unwind_target = unwind_drop;
+                            } else {
+                                // FIXME: Not completely sure at this point, but I think
+                                // we're good with doing nothing here.
+                            }
+                        }
+                        DropKind::Value => {
+                            debug!("Value drop");
+                            let unwind_drops = &mut self.scopes.unwind_drops;
+                            debug!("unwind_drops: {:#?}", unwind_drops);
+                            let unwind_drop =
+                                unwind_drops.add_drop(drop_data.0, next_unwind_target);
+                            cached_drop = Some(unwind_drop);
+                            debug!(?unwind_drop);
+                            self.scopes.unwind_drops.add_entry(
+                                blocks[drop_idx].unwrap(),
+                                next_unwind_target,
+                                None,
+                            );
+                            next_unwind_target = unwind_drop;
+                        }
+                    }
+                }
+            }
+        }
+
+        for s in self.scopes.scopes.iter_mut().rev() {
+            if s.region_scope == region_scope {
+                s.cached_unwind_block = cached_drop;
+                break;
+            }
+        }
+    }
+
+    /// Obtains the correct `DropIdx` on the unwind path for the given `BreakIdx`.
+    /// As elaborated in more detail in the comment to `link_to_unwind_drop_tree_for_breaks`
+    /// this is necessary because the caching is messed up.
+    #[instrument(skip(self), level = "debug")]
+    fn get_unwind_target_for_break(&self, break_idx: BreakIdx) -> DropIdx {
+        let drop_idx = self
+            .scopes
+            .unwind_drops
+            .drops
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(i, (drop, _))| {
+                debug!(?i, ?drop);
+                drop.break_idx.is_none() || drop.break_idx.unwrap() == break_idx
+            })
+            .map(|(i, _)| i)
+            .unwrap_or_else(|| 0);
+
+        DropIdx::from_usize(drop_idx)
     }
 
     /// Build the unwind and generator drop trees.
@@ -1418,7 +1674,8 @@ impl<'a, 'tcx: 'a> Builder<'a, 'tcx> {
         for (drop_idx, drop_data) in drops.drops.iter_enumerated() {
             if let DropKind::Value = drop_data.0.kind {
                 debug_assert!(drop_data.1 < drops.drops.next_index());
-                drops.entry_points.push((drop_data.1, blocks[drop_idx].unwrap()));
+                // TO-DO consider whether you have to use break idx here!
+                drops.entry_points.push((drop_data.1, blocks[drop_idx].unwrap(), None));
             }
         }
         Self::build_unwind_tree(cfg, drops, fn_span, resume_block);
