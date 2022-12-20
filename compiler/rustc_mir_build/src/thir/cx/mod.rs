@@ -29,7 +29,7 @@ pub(crate) fn thir_body<'tcx>(
     if let Some(reported) = cx.typeck_results.tainted_by_errors {
         return Err(reported);
     }
-    let expr = cx.mirror_expr(&body.value);
+    let expr = cx.mirror_expr(&body.value, false);
 
     let owner_id = hir.local_def_id_to_hir_id(owner_def.did);
     if let Some(ref fn_decl) = hir.fn_decl_by_hir_id(owner_id) {

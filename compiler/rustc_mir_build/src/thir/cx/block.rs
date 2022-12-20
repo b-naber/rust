@@ -24,7 +24,7 @@ impl<'tcx> Cx<'tcx> {
             opt_destruction_scope,
             span: block.span,
             stmts,
-            expr: block.expr.map(|expr| self.mirror_expr(expr)),
+            expr: block.expr.map(|expr| self.mirror_expr(expr, block.targeted_by_break)),
             safety_mode: match block.rules {
                 hir::BlockCheckMode::DefaultBlock => BlockSafety::Safe,
                 hir::BlockCheckMode::UnsafeBlock(hir::UnsafeSource::CompilerGenerated) => {
@@ -58,7 +58,7 @@ impl<'tcx> Cx<'tcx> {
                                     id: hir_id.local_id,
                                     data: region::ScopeData::Node,
                                 },
-                                expr: self.mirror_expr(expr),
+                                expr: self.mirror_expr(expr, false),
                             },
                             opt_destruction_scope: opt_dxn_ext,
                         };
@@ -113,7 +113,7 @@ impl<'tcx> Cx<'tcx> {
                                     data: region::ScopeData::Node,
                                 },
                                 pattern,
-                                initializer: local.init.map(|init| self.mirror_expr(init)),
+                                initializer: local.init.map(|init| self.mirror_expr(init, false)),
                                 else_block,
                                 lint_level: LintLevel::Explicit(local.hir_id),
                             },

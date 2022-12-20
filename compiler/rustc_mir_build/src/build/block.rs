@@ -36,6 +36,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                             expr,
                             safety_mode,
                             region_scope,
+                            true,
                         ))
                     })
                 } else {
@@ -47,12 +48,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         expr,
                         safety_mode,
                         region_scope,
+                        false,
                     )
                 }
             })
         })
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn ast_block_stmts(
         &mut self,
         destination: Place<'tcx>,
@@ -62,6 +65,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         expr: Option<&Expr<'tcx>>,
         safety_mode: BlockSafety,
         region_scope: Scope,
+        label_block: bool,
     ) -> BlockAnd<()> {
         let this = self;
 
@@ -363,7 +367,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             this.block_context
                 .push(BlockFrame::TailExpr { tail_result_is_ignored, span: expr.span });
 
-            unpack!(block = this.expr_into_dest(destination, block, expr));
+            if label_block {
+                this.scopes.breakable_scopes.last_mut().unwrap().in_label_block_expr = true;
+                unpack!(block = this.expr_into_dest(destination, block, expr));
+                this.scopes.breakable_scopes.last_mut().unwrap().in_label_block_expr = false;
+            } else {
+                unpack!(block = this.expr_into_dest(destination, block, expr));
+            }
+
             let popped = this.block_context.pop();
 
             assert!(popped.map_or(false, |bf| bf.is_tail_expr()));

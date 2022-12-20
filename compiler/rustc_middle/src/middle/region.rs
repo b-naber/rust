@@ -95,6 +95,7 @@ impl fmt::Debug for Scope {
             ScopeData::Arguments => write!(fmt, "Arguments({:?})", self.id),
             ScopeData::Destruction => write!(fmt, "Destruction({:?})", self.id),
             ScopeData::IfThen => write!(fmt, "IfThen({:?})", self.id),
+            ScopeData::LabelBlockExpr => write!(fmt, "LabelBlockExpr({:?})", self.id),
             ScopeData::Remainder(fsi) => write!(
                 fmt,
                 "Remainder {{ block: {:?}, first_statement_index: {}}}",
@@ -127,6 +128,9 @@ pub enum ScopeData {
 
     /// Scope following a `let id = expr;` binding in a block.
     Remainder(FirstStatementIndex),
+
+    /// Scope corresponding to the expression of a label block (`'scope: {..}`)
+    LabelBlockExpr,
 }
 
 rustc_index::newtype_index! {

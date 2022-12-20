@@ -98,7 +98,7 @@ pub struct Scopes<'tcx> {
     scopes: Vec<Scope>,
 
     /// The current set of breakable scopes. See module comment for more details.
-    breakable_scopes: Vec<BreakableScope<'tcx>>,
+    pub(crate) breakable_scopes: Vec<BreakableScope<'tcx>>,
 
     /// The scope of the innermost if-then currently being lowered.
     if_then_scope: Option<IfThenScope>,
@@ -156,7 +156,7 @@ pub(crate) enum DropKind {
 }
 
 #[derive(Debug)]
-struct BreakableScope<'tcx> {
+pub(crate) struct BreakableScope<'tcx> {
     /// Region scope of the loop
     region_scope: region::Scope,
     /// The destination of the loop/block expression itself (i.e., where to put
@@ -166,6 +166,8 @@ struct BreakableScope<'tcx> {
     break_drops: DropTree,
     /// Drops that happen on the `continue` path.
     continue_drops: Option<DropTree>,
+
+    pub(crate) in_label_block_expr: bool,
 }
 
 #[derive(Debug)]
@@ -456,6 +458,24 @@ impl<'tcx> Scopes<'tcx> {
     fn topmost(&self) -> region::Scope {
         self.scopes.last().expect("topmost_scope: no scopes present").region_scope
     }
+
+    #[instrument(skip(self), level = "debug")]
+    fn find_innermost_label_block_expr_scope(&self) -> region::Scope {
+        for scope in self.scopes.iter().rev() {
+            match scope.region_scope {
+                region::Scope { data: region::ScopeData::LabelBlockExpr, .. } => {
+                    return scope.region_scope;
+                }
+                _ => continue,
+            }
+        }
+
+        bug!(
+            "expected to find LabelBlockExpr scope given that BreakableScope \
+            has `in_label_block_expr` flag set. All scopes: {:#?}",
+            self.scopes
+        )
+    }
 }
 
 impl<'a, 'tcx> Builder<'a, 'tcx> {
@@ -481,6 +501,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             break_destination,
             break_drops: DropTree::new(),
             continue_drops: loop_block.map(|_| DropTree::new()),
+            in_label_block_expr: false,
         };
         debug!(?scope);
         self.scopes.breakable_scopes.push(scope);
@@ -901,6 +922,18 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         local: Local,
         drop_kind: DropKind,
     ) {
+        let region_scope = if let Some(breakable_scope) = self.scopes.breakable_scopes.last() {
+            debug!("breakable_scope: {:#?}", breakable_scope);
+            if breakable_scope.in_label_block_expr && self.is_return_region_scope(region_scope) {
+                self.scopes.find_innermost_label_block_expr_scope()
+            } else {
+                region_scope
+            }
+        } else {
+            region_scope
+        };
+        debug!(?region_scope);
+
         let needs_drop = match drop_kind {
             DropKind::Value => {
                 if !self.local_decls[local].ty.needs_drop(self.tcx, self.param_env) {
@@ -1226,6 +1259,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
 
         top_scope.drops.clear();
         top_scope.invalidate_cache();
+    }
+
+    #[instrument(skip(self), level = "debug")]
+    fn is_return_region_scope(&self, region_scope: region::Scope) -> bool {
+        let region_scope_id = region_scope.id;
+        let return_scope_id = self.scopes.scopes[0].region_scope.id;
+
+        region_scope_id == return_scope_id
     }
 }
 

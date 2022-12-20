@@ -22,17 +22,25 @@ use rustc_span::Span;
 use rustc_target::abi::VariantIdx;
 
 impl<'tcx> Cx<'tcx> {
-    pub(crate) fn mirror_expr(&mut self, expr: &'tcx hir::Expr<'tcx>) -> ExprId {
+    pub(crate) fn mirror_expr(
+        &mut self,
+        expr: &'tcx hir::Expr<'tcx>,
+        label_block_expr: bool,
+    ) -> ExprId {
         // `mirror_expr` is recursing very deep. Make sure the stack doesn't overflow.
-        ensure_sufficient_stack(|| self.mirror_expr_inner(expr))
+        ensure_sufficient_stack(|| self.mirror_expr_inner(expr, label_block_expr))
     }
 
     pub(crate) fn mirror_exprs(&mut self, exprs: &'tcx [hir::Expr<'tcx>]) -> Box<[ExprId]> {
-        exprs.iter().map(|expr| self.mirror_expr_inner(expr)).collect()
+        exprs.iter().map(|expr| self.mirror_expr_inner(expr, false)).collect()
     }
 
     #[instrument(level = "trace", skip(self, hir_expr))]
-    pub(super) fn mirror_expr_inner(&mut self, hir_expr: &'tcx hir::Expr<'tcx>) -> ExprId {
+    pub(super) fn mirror_expr_inner(
+        &mut self,
+        hir_expr: &'tcx hir::Expr<'tcx>,
+        label_block_expr: bool,
+    ) -> ExprId {
         debug!("hir_expr: {:#?}", hir_expr);
         let temp_lifetime =
             self.rvalue_scopes.temporary_scope(self.region_scope_tree, hir_expr.hir_id.local_id);
@@ -66,6 +74,24 @@ impl<'tcx> Cx<'tcx> {
         }
 
         trace!(?expr.ty, "after adjustments");
+
+        if label_block_expr {
+            let label_expr_scope = region::Scope {
+                id: hir_expr.hir_id.local_id,
+                data: region::ScopeData::LabelBlockExpr,
+            };
+
+            expr = Expr {
+                temp_lifetime,
+                ty: expr.ty,
+                span: hir_expr.span,
+                kind: ExprKind::Scope {
+                    region_scope: label_expr_scope,
+                    value: self.thir.exprs.push(expr),
+                    lint_level: LintLevel::Explicit(hir_expr.hir_id),
+                },
+            };
+        }
 
         // Next, wrap this up in the expr's scope.
         expr = Expr {
@@ -187,13 +213,13 @@ impl<'tcx> Cx<'tcx> {
         // using a coercion (or is a no-op).
         if self.typeck_results().is_coercion_cast(source.hir_id) {
             // Convert the lexpr to a vexpr.
-            ExprKind::Use { source: self.mirror_expr(source) }
+            ExprKind::Use { source: self.mirror_expr(source, false) }
         } else if self.typeck_results().expr_ty(source).is_region_ptr() {
             // Special cased so that we can type check that the element
             // type of the source matches the pointed to type of the
             // destination.
             ExprKind::Pointer {
-                source: self.mirror_expr(source),
+                source: self.mirror_expr(source, false),
                 cast: PointerCast::ArrayToPointer,
             }
         } else {
@@ -210,17 +236,17 @@ impl<'tcx> Cx<'tcx> {
             // so we wouldn't have to compute and store the actual value
 
             let hir::ExprKind::Path(ref qpath) = source.kind else {
-                return ExprKind::Cast { source: self.mirror_expr(source)};
+                return ExprKind::Cast { source: self.mirror_expr(source, false)};
             };
 
             let res = self.typeck_results().qpath_res(qpath, source.hir_id);
             let ty = self.typeck_results().node_type(source.hir_id);
             let ty::Adt(adt_def, substs) = ty.kind() else {
-                return ExprKind::Cast { source: self.mirror_expr(source)};
+                return ExprKind::Cast { source: self.mirror_expr(source, false)};
             };
 
             let Res::Def(DefKind::Ctor(CtorOf::Variant, CtorKind::Const), variant_ctor_id) = res else {
-                return ExprKind::Cast { source: self.mirror_expr(source)};
+                return ExprKind::Cast { source: self.mirror_expr(source, false)};
             };
 
             let idx = adt_def.variant_index_with_ctor_id(variant_ctor_id);
@@ -286,7 +312,7 @@ impl<'tcx> Cx<'tcx> {
                 info!("Using method span: {:?}", expr.span);
                 let args = std::iter::once(receiver)
                     .chain(args.iter())
-                    .map(|expr| self.mirror_expr(expr))
+                    .map(|expr| self.mirror_expr(expr, false))
                     .collect();
                 self.adjustment_span = old_adjustment_span;
                 ExprKind::Call {
@@ -321,7 +347,7 @@ impl<'tcx> Cx<'tcx> {
                     ExprKind::Call {
                         ty: method.ty,
                         fun: self.thir.exprs.push(method),
-                        args: Box::new([self.mirror_expr(fun), tupled_args]),
+                        args: Box::new([self.mirror_expr(fun, false), tupled_args]),
                         from_hir_call: true,
                         fn_span: expr.span,
                     }
@@ -356,7 +382,7 @@ impl<'tcx> Cx<'tcx> {
                             .enumerate()
                             .map(|(idx, e)| FieldExpr {
                                 name: Field::new(idx),
-                                expr: self.mirror_expr(e),
+                                expr: self.mirror_expr(e, false),
                             })
                             .collect();
                         ExprKind::Adt(Box::new(AdtExpr {
@@ -370,7 +396,7 @@ impl<'tcx> Cx<'tcx> {
                     } else {
                         ExprKind::Call {
                             ty: self.typeck_results().node_type(fun.hir_id),
-                            fun: self.mirror_expr(fun),
+                            fun: self.mirror_expr(fun, false),
                             args: self.mirror_exprs(args),
                             from_hir_call: true,
                             fn_span: expr.span,
@@ -379,30 +405,32 @@ impl<'tcx> Cx<'tcx> {
                 }
             }
 
-            hir::ExprKind::AddrOf(hir::BorrowKind::Ref, mutbl, ref arg) => {
-                ExprKind::Borrow { borrow_kind: mutbl.to_borrow_kind(), arg: self.mirror_expr(arg) }
-            }
+            hir::ExprKind::AddrOf(hir::BorrowKind::Ref, mutbl, ref arg) => ExprKind::Borrow {
+                borrow_kind: mutbl.to_borrow_kind(),
+                arg: self.mirror_expr(arg, false),
+            },
 
             hir::ExprKind::AddrOf(hir::BorrowKind::Raw, mutability, ref arg) => {
-                ExprKind::AddressOf { mutability, arg: self.mirror_expr(arg) }
+                ExprKind::AddressOf { mutability, arg: self.mirror_expr(arg, false) }
             }
 
             hir::ExprKind::Block(ref blk, _) => ExprKind::Block { block: self.mirror_block(blk) },
 
-            hir::ExprKind::Assign(ref lhs, ref rhs, _) => {
-                ExprKind::Assign { lhs: self.mirror_expr(lhs), rhs: self.mirror_expr(rhs) }
-            }
+            hir::ExprKind::Assign(ref lhs, ref rhs, _) => ExprKind::Assign {
+                lhs: self.mirror_expr(lhs, false),
+                rhs: self.mirror_expr(rhs, false),
+            },
 
             hir::ExprKind::AssignOp(op, ref lhs, ref rhs) => {
                 if self.typeck_results().is_method_call(expr) {
-                    let lhs = self.mirror_expr(lhs);
-                    let rhs = self.mirror_expr(rhs);
+                    let lhs = self.mirror_expr(lhs, false);
+                    let rhs = self.mirror_expr(rhs, false);
                     self.overloaded_operator(expr, Box::new([lhs, rhs]))
                 } else {
                     ExprKind::AssignOp {
                         op: bin_op(op.node),
-                        lhs: self.mirror_expr(lhs),
-                        rhs: self.mirror_expr(rhs),
+                        lhs: self.mirror_expr(lhs, false),
+                        rhs: self.mirror_expr(rhs, false),
                     }
                 }
             }
@@ -411,28 +439,28 @@ impl<'tcx> Cx<'tcx> {
 
             hir::ExprKind::Binary(op, ref lhs, ref rhs) => {
                 if self.typeck_results().is_method_call(expr) {
-                    let lhs = self.mirror_expr(lhs);
-                    let rhs = self.mirror_expr(rhs);
+                    let lhs = self.mirror_expr(lhs, false);
+                    let rhs = self.mirror_expr(rhs, false);
                     self.overloaded_operator(expr, Box::new([lhs, rhs]))
                 } else {
                     // FIXME overflow
                     match op.node {
                         hir::BinOpKind::And => ExprKind::LogicalOp {
                             op: LogicalOp::And,
-                            lhs: self.mirror_expr(lhs),
-                            rhs: self.mirror_expr(rhs),
+                            lhs: self.mirror_expr(lhs, false),
+                            rhs: self.mirror_expr(rhs, false),
                         },
                         hir::BinOpKind::Or => ExprKind::LogicalOp {
                             op: LogicalOp::Or,
-                            lhs: self.mirror_expr(lhs),
-                            rhs: self.mirror_expr(rhs),
+                            lhs: self.mirror_expr(lhs, false),
+                            rhs: self.mirror_expr(rhs, false),
                         },
                         _ => {
                             let op = bin_op(op.node);
                             ExprKind::Binary {
                                 op,
-                                lhs: self.mirror_expr(lhs),
-                                rhs: self.mirror_expr(rhs),
+                                lhs: self.mirror_expr(lhs, false),
+                                rhs: self.mirror_expr(rhs, false),
                             }
                         }
                     }
@@ -441,40 +469,43 @@ impl<'tcx> Cx<'tcx> {
 
             hir::ExprKind::Index(ref lhs, ref index) => {
                 if self.typeck_results().is_method_call(expr) {
-                    let lhs = self.mirror_expr(lhs);
-                    let index = self.mirror_expr(index);
+                    let lhs = self.mirror_expr(lhs, false);
+                    let index = self.mirror_expr(index, false);
                     self.overloaded_place(expr, expr_ty, None, Box::new([lhs, index]), expr.span)
                 } else {
-                    ExprKind::Index { lhs: self.mirror_expr(lhs), index: self.mirror_expr(index) }
+                    ExprKind::Index {
+                        lhs: self.mirror_expr(lhs, false),
+                        index: self.mirror_expr(index, false),
+                    }
                 }
             }
 
             hir::ExprKind::Unary(hir::UnOp::Deref, ref arg) => {
                 if self.typeck_results().is_method_call(expr) {
-                    let arg = self.mirror_expr(arg);
+                    let arg = self.mirror_expr(arg, false);
                     self.overloaded_place(expr, expr_ty, None, Box::new([arg]), expr.span)
                 } else {
-                    ExprKind::Deref { arg: self.mirror_expr(arg) }
+                    ExprKind::Deref { arg: self.mirror_expr(arg, false) }
                 }
             }
 
             hir::ExprKind::Unary(hir::UnOp::Not, ref arg) => {
                 if self.typeck_results().is_method_call(expr) {
-                    let arg = self.mirror_expr(arg);
+                    let arg = self.mirror_expr(arg, false);
                     self.overloaded_operator(expr, Box::new([arg]))
                 } else {
-                    ExprKind::Unary { op: UnOp::Not, arg: self.mirror_expr(arg) }
+                    ExprKind::Unary { op: UnOp::Not, arg: self.mirror_expr(arg, false) }
                 }
             }
 
             hir::ExprKind::Unary(hir::UnOp::Neg, ref arg) => {
                 if self.typeck_results().is_method_call(expr) {
-                    let arg = self.mirror_expr(arg);
+                    let arg = self.mirror_expr(arg, false);
                     self.overloaded_operator(expr, Box::new([arg]))
                 } else if let hir::ExprKind::Lit(ref lit) = arg.kind {
                     ExprKind::Literal { lit, neg: true }
                 } else {
-                    ExprKind::Unary { op: UnOp::Neg, arg: self.mirror_expr(arg) }
+                    ExprKind::Unary { op: UnOp::Neg, arg: self.mirror_expr(arg, false) }
                 }
             }
 
@@ -491,7 +522,7 @@ impl<'tcx> Cx<'tcx> {
                             user_ty,
                             fields: self.field_refs(fields),
                             base: base.map(|base| FruInfo {
-                                base: self.mirror_expr(base),
+                                base: self.mirror_expr(base, false),
                                 field_types: self.typeck_results().fru_field_types()[expr.hir_id]
                                     .iter()
                                     .copied()
@@ -587,17 +618,21 @@ impl<'tcx> Cx<'tcx> {
                     .iter()
                     .map(|(op, _op_sp)| match *op {
                         hir::InlineAsmOperand::In { reg, ref expr } => {
-                            InlineAsmOperand::In { reg, expr: self.mirror_expr(expr) }
+                            InlineAsmOperand::In { reg, expr: self.mirror_expr(expr, false) }
                         }
                         hir::InlineAsmOperand::Out { reg, late, ref expr } => {
                             InlineAsmOperand::Out {
                                 reg,
                                 late,
-                                expr: expr.map(|expr| self.mirror_expr(expr)),
+                                expr: expr.map(|expr| self.mirror_expr(expr, false)),
                             }
                         }
                         hir::InlineAsmOperand::InOut { reg, late, ref expr } => {
-                            InlineAsmOperand::InOut { reg, late, expr: self.mirror_expr(expr) }
+                            InlineAsmOperand::InOut {
+                                reg,
+                                late,
+                                expr: self.mirror_expr(expr, false),
+                            }
                         }
                         hir::InlineAsmOperand::SplitInOut {
                             reg,
@@ -607,8 +642,8 @@ impl<'tcx> Cx<'tcx> {
                         } => InlineAsmOperand::SplitInOut {
                             reg,
                             late,
-                            in_expr: self.mirror_expr(in_expr),
-                            out_expr: out_expr.map(|expr| self.mirror_expr(expr)),
+                            in_expr: self.mirror_expr(in_expr, false),
+                            out_expr: out_expr.map(|expr| self.mirror_expr(expr, false)),
                         },
                         hir::InlineAsmOperand::Const { ref anon_const } => {
                             let value = mir::ConstantKind::from_anon_const(
@@ -658,13 +693,15 @@ impl<'tcx> Cx<'tcx> {
                     span_bug!(expr.span, "unexpected repeat expr ty: {:?}", ty);
                 };
 
-                ExprKind::Repeat { value: self.mirror_expr(v), count: *count }
+                ExprKind::Repeat { value: self.mirror_expr(v, false), count: *count }
             }
-            hir::ExprKind::Ret(ref v) => ExprKind::Return { value: v.map(|v| self.mirror_expr(v)) },
+            hir::ExprKind::Ret(ref v) => {
+                ExprKind::Return { value: v.map(|v| self.mirror_expr(v, false)) }
+            }
             hir::ExprKind::Break(dest, ref value) => match dest.target_id {
                 Ok(target_id) => ExprKind::Break {
                     label: region::Scope { id: target_id.local_id, data: region::ScopeData::Node },
-                    value: value.map(|value| self.mirror_expr(value)),
+                    value: value.map(|value| self.mirror_expr(value, false)),
                 },
                 Err(err) => bug!("invalid loop id for break: {}", err),
             },
@@ -675,7 +712,7 @@ impl<'tcx> Cx<'tcx> {
                 Err(err) => bug!("invalid loop id for continue: {}", err),
             },
             hir::ExprKind::Let(let_expr) => ExprKind::Let {
-                expr: self.mirror_expr(let_expr.init),
+                expr: self.mirror_expr(let_expr.init, false),
                 pat: self.pattern_from_hir(let_expr.pat),
             },
             hir::ExprKind::If(cond, then, else_opt) => ExprKind::If {
@@ -683,12 +720,12 @@ impl<'tcx> Cx<'tcx> {
                     id: then.hir_id.local_id,
                     data: region::ScopeData::IfThen,
                 },
-                cond: self.mirror_expr(cond),
-                then: self.mirror_expr(then),
-                else_opt: else_opt.map(|el| self.mirror_expr(el)),
+                cond: self.mirror_expr(cond, false),
+                then: self.mirror_expr(then, false),
+                else_opt: else_opt.map(|el| self.mirror_expr(el, false)),
             },
             hir::ExprKind::Match(ref discr, ref arms, _) => ExprKind::Match {
-                scrutinee: self.mirror_expr(discr),
+                scrutinee: self.mirror_expr(discr, false),
                 arms: arms.iter().map(|a| self.convert_arm(a)).collect(),
             },
             hir::ExprKind::Loop(ref body, ..) => {
@@ -706,7 +743,7 @@ impl<'tcx> Cx<'tcx> {
                 ExprKind::Loop { body }
             }
             hir::ExprKind::Field(ref source, ..) => ExprKind::Field {
-                lhs: self.mirror_expr(source),
+                lhs: self.mirror_expr(source, false),
                 variant_index: VariantIdx::new(0),
                 name: Field::new(self.typeck_results.field_index(expr.hir_id)),
             },
@@ -745,7 +782,7 @@ impl<'tcx> Cx<'tcx> {
                 let user_provided_types = self.typeck_results.user_provided_types();
                 let user_ty = user_provided_types.get(ty.hir_id).copied().map(Box::new);
                 debug!("make_mirror_unadjusted: (type) user_ty={:?}", user_ty);
-                let mirrored = self.mirror_expr(source);
+                let mirrored = self.mirror_expr(source, false);
                 if source.is_syntactic_place_expr() {
                     ExprKind::PlaceTypeAscription { source: mirrored, user_ty }
                 } else {
@@ -753,15 +790,17 @@ impl<'tcx> Cx<'tcx> {
                 }
             }
             hir::ExprKind::DropTemps(ref source) => {
-                ExprKind::Use { source: self.mirror_expr(source) }
+                ExprKind::Use { source: self.mirror_expr(source, false) }
             }
-            hir::ExprKind::Box(ref value) => ExprKind::Box { value: self.mirror_expr(value) },
+            hir::ExprKind::Box(ref value) => {
+                ExprKind::Box { value: self.mirror_expr(value, false) }
+            }
             hir::ExprKind::Array(ref fields) => {
                 ExprKind::Array { fields: self.mirror_exprs(fields) }
             }
             hir::ExprKind::Tup(ref fields) => ExprKind::Tuple { fields: self.mirror_exprs(fields) },
 
-            hir::ExprKind::Yield(ref v, _) => ExprKind::Yield { value: self.mirror_expr(v) },
+            hir::ExprKind::Yield(ref v, _) => ExprKind::Yield { value: self.mirror_expr(v, false) },
             hir::ExprKind::Err => unreachable!(),
         };
 
@@ -833,12 +872,12 @@ impl<'tcx> Cx<'tcx> {
         let arm = Arm {
             pattern: self.pattern_from_hir(&arm.pat),
             guard: arm.guard.as_ref().map(|g| match g {
-                hir::Guard::If(ref e) => Guard::If(self.mirror_expr(e)),
+                hir::Guard::If(ref e) => Guard::If(self.mirror_expr(e, false)),
                 hir::Guard::IfLet(ref l) => {
-                    Guard::IfLet(self.pattern_from_hir(l.pat), self.mirror_expr(l.init))
+                    Guard::IfLet(self.pattern_from_hir(l.pat), self.mirror_expr(l.init, false))
                 }
             }),
-            body: self.mirror_expr(arm.body),
+            body: self.mirror_expr(arm.body, false),
             lint_level: LintLevel::Explicit(arm.hir_id),
             scope: region::Scope { id: arm.hir_id.local_id, data: region::ScopeData::Node },
             span: arm.span,
@@ -1084,7 +1123,7 @@ impl<'tcx> Cx<'tcx> {
             .iter()
             .map(|field| FieldExpr {
                 name: Field::new(self.typeck_results.field_index(field.hir_id)),
-                expr: self.mirror_expr(field.expr),
+                expr: self.mirror_expr(field.expr, false),
             })
             .collect()
     }
