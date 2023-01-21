@@ -1425,6 +1425,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
     /// If `propagated_outlives_requirements` is `Some`, then we will
     /// push unsatisfied obligations into there. Otherwise, we'll
     /// report them as errors.
+    #[instrument(skip(propagated_outlives_requirements, errors_buffer), level = "debug")]
     fn check_universal_regions(
         &self,
         mut propagated_outlives_requirements: Option<&mut Vec<ClosureOutlivesRequirement<'tcx>>>,

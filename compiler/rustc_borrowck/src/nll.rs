@@ -155,6 +155,10 @@ fn populate_polonius_move_facts(
 /// Computes the (non-lexical) regions from the input MIR.
 ///
 /// This may result in errors being reported.
+#[instrument(
+    skip(infcx, universal_regions, body, promoted, location_table, move_data, borrow_set),
+    level = "debug"
+)]
 pub(crate) fn compute_regions<'cx, 'tcx>(
     infcx: &BorrowckInferCtxt<'_, 'tcx>,
     universal_regions: UniversalRegions<'tcx>,
@@ -168,6 +172,8 @@ pub(crate) fn compute_regions<'cx, 'tcx>(
     upvars: &[Upvar<'tcx>],
     use_polonius: bool,
 ) -> NllOutput<'tcx> {
+    debug!("universal_regions: {:#?}", universal_regions);
+
     let mut all_facts =
         (use_polonius || AllFacts::enabled(infcx.tcx)).then_some(AllFacts::default());
 
@@ -192,6 +198,9 @@ pub(crate) fn compute_regions<'cx, 'tcx>(
             upvars,
             use_polonius,
         );
+
+    debug!("constraints: {:?}", constraints);
+    debug!("universal_region_relations: {:#?}" universal_region_relations);
 
     if let Some(all_facts) = &mut all_facts {
         let _prof_timer = infcx.tcx.prof.generic_activity("polonius_fact_generation");
@@ -256,6 +265,7 @@ pub(crate) fn compute_regions<'cx, 'tcx>(
         &body,
         borrow_set,
     );
+    debug!("liveness_constraints: {:#?}"; liveness_constraints);
 
     let mut regioncx = RegionInferenceContext::new(
         infcx,
@@ -449,7 +459,11 @@ pub trait ToRegionVid {
 
 impl<'tcx> ToRegionVid for Region<'tcx> {
     fn to_region_vid(self) -> RegionVid {
-        if let ty::ReVar(vid) = *self { vid } else { bug!("region is not an ReVar: {:?}", self) }
+        if let ty::ReVar(vid) = *self {
+            vid
+        } else {
+            bug!("region is not an ReVar: {:?}", self)
+        }
     }
 }
 

@@ -118,6 +118,7 @@ pub(crate) enum RegionElement {
 
 /// When we initially compute liveness, we use an interval matrix storing
 /// liveness ranges for each region-vid.
+#[derive(Debug)]
 pub(crate) struct LivenessValues<N: Idx> {
     elements: Rc<RegionValueElements>,
     points: SparseIntervalMatrix<N, PointIndex>,

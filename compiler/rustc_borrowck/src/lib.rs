@@ -222,6 +222,8 @@ fn do_mir_borrowck<'tcx>(
     let free_regions =
         nll::replace_regions_in_mir(&infcx, param_env, &mut body_owned, &mut promoted);
     let body = &body_owned; // no further changes
+    debug!("free_regions: {:#?}", free_regions);
+    debug!("body: {:#?}", body);
 
     let location_table_owned = LocationTable::new(body);
     let location_table = &location_table_owned;
@@ -246,6 +248,7 @@ fn do_mir_borrowck<'tcx>(
     let locals_are_invalidated_at_exit = tcx.hir().body_owner_kind(def.did).is_fn_or_closure();
     let borrow_set =
         Rc::new(BorrowSet::build(tcx, body, locals_are_invalidated_at_exit, &mdpe.move_data));
+    debug!("borrow_set: {:#?}", borrow_set);
 
     let use_polonius = return_body_with_facts || infcx.tcx.sess.opts.unstable_opts.polonius;
 
@@ -1663,11 +1666,11 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 mpi,
             );
         } // Only query longest prefix with a MovePath, not further
-        // ancestors; dataflow recurs on children when parents
-        // move (to support partial (re)inits).
-        //
-        // (I.e., querying parents breaks scenario 7; but may want
-        // to do such a query based on partial-init feature-gate.)
+          // ancestors; dataflow recurs on children when parents
+          // move (to support partial (re)inits).
+          //
+          // (I.e., querying parents breaks scenario 7; but may want
+          // to do such a query based on partial-init feature-gate.)
     }
 
     /// Subslices correspond to multiple move paths, so we iterate through the
