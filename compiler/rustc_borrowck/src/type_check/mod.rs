@@ -909,6 +909,20 @@ pub(crate) struct MirTypeckRegionConstraints<'tcx> {
     pub(crate) type_tests: Vec<TypeTest<'tcx>>,
 }
 
+impl<'tcx> fmt::Debug for MirTypeckRegionConstraints<'tcx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(&format!("MirTypeckRegionConstraints:\n"))?;
+        f.write_str(&format!("placeholder_indices: {:?}", self.placeholder_indices))?;
+        f.write_str(&format!(
+            "placeholder_index_to_region: {:?}",
+            self.placeholder_index_to_region
+        ))?;
+        f.write_str(&format!("outlives_constraints: {:?}", self.outlives_constraints))?;
+        f.write_str(&format!("member_constraints: {:?}", self.member_constraints))?;
+        f.write_str(&format!("type_tests: {:?}", self.type_tests))
+    }
+}
+
 impl<'tcx> MirTypeckRegionConstraints<'tcx> {
     fn placeholder_region(
         &mut self,

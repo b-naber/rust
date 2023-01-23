@@ -156,7 +156,16 @@ fn populate_polonius_move_facts(
 ///
 /// This may result in errors being reported.
 #[instrument(
-    skip(infcx, universal_regions, body, promoted, location_table, move_data, borrow_set),
+    skip(
+        infcx,
+        universal_regions,
+        body,
+        promoted,
+        location_table,
+        flow_inits,
+        move_data,
+        borrow_set
+    ),
     level = "debug"
 )]
 pub(crate) fn compute_regions<'cx, 'tcx>(
@@ -200,7 +209,7 @@ pub(crate) fn compute_regions<'cx, 'tcx>(
         );
 
     debug!("constraints: {:?}", constraints);
-    debug!("universal_region_relations: {:#?}" universal_region_relations);
+    debug!("universal_region_relations: {:#?}", universal_region_relations);
 
     if let Some(all_facts) = &mut all_facts {
         let _prof_timer = infcx.tcx.prof.generic_activity("polonius_fact_generation");
@@ -265,7 +274,6 @@ pub(crate) fn compute_regions<'cx, 'tcx>(
         &body,
         borrow_set,
     );
-    debug!("liveness_constraints: {:#?}"; liveness_constraints);
 
     let mut regioncx = RegionInferenceContext::new(
         infcx,

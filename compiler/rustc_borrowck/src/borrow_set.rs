@@ -14,6 +14,7 @@ use rustc_mir_dataflow::move_paths::MoveData;
 use std::fmt;
 use std::ops::Index;
 
+#[derive(Debug)]
 pub struct BorrowSet<'tcx> {
     /// The fundamental map relating bitvector indexes to the borrows
     /// in the MIR. Each borrow is also uniquely identified in the MIR
@@ -80,6 +81,7 @@ impl<'tcx> fmt::Display for BorrowData<'tcx> {
     }
 }
 
+#[derive(Debug)]
 pub enum LocalsStateAtExit {
     AllAreInvalidated,
     SomeAreInvalidated { has_storage_dead_or_moved: BitSet<Local> },
