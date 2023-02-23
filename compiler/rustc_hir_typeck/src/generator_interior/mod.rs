@@ -175,6 +175,7 @@ impl<'a, 'tcx> InteriorVisitor<'a, 'tcx> {
     }
 }
 
+#[instrument(skip(fcx), level = "debug")]
 pub fn resolve_interior<'a, 'tcx>(
     fcx: &'a FnCtxt<'a, 'tcx>,
     def_id: DefId,
@@ -329,6 +330,7 @@ pub fn resolve_interior<'a, 'tcx>(
 // librustc_middle/middle/region.rs since `expr_count` is compared against the results
 // there.
 impl<'a, 'tcx> Visitor<'tcx> for InteriorVisitor<'a, 'tcx> {
+    #[instrument(skip(self), level = "debug")]
     fn visit_arm(&mut self, arm: &'tcx Arm<'tcx>) {
         let Arm { guard, pat, body, .. } = arm;
         self.visit_pat(pat);
@@ -387,6 +389,7 @@ impl<'a, 'tcx> Visitor<'tcx> for InteriorVisitor<'a, 'tcx> {
         self.visit_expr(body);
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn visit_pat(&mut self, pat: &'tcx Pat<'tcx>) {
         intravisit::walk_pat(self, pat);
 
@@ -399,6 +402,7 @@ impl<'a, 'tcx> Visitor<'tcx> for InteriorVisitor<'a, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) {
         match &expr.kind {
             ExprKind::Call(callee, args) => match &callee.kind {
@@ -520,7 +524,7 @@ impl<'a, 'tcx> Visitor<'tcx> for InteriorVisitor<'a, 'tcx> {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct SuspendCheckData<'a, 'tcx> {
     expr: Option<&'tcx Expr<'tcx>>,
     source_span: Span,
@@ -536,6 +540,7 @@ struct SuspendCheckData<'a, 'tcx> {
 //
 // Note that this technique was chosen over things like a `Suspend` marker trait
 // as it is simpler and has precedent in the compiler
+#[instrument(skip(fcx), level = "debug")]
 fn check_must_not_suspend_ty<'tcx>(
     fcx: &FnCtxt<'_, 'tcx>,
     ty: Ty<'tcx>,
@@ -653,6 +658,7 @@ fn check_must_not_suspend_ty<'tcx>(
     }
 }
 
+#[instrument(skip(tcx), level = "debug")]
 fn check_must_not_suspend_def(
     tcx: TyCtxt<'_>,
     def_id: DefId,

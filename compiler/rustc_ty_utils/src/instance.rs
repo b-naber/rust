@@ -94,6 +94,7 @@ fn inner_resolve_instance<'tcx>(
     result
 }
 
+#[instrument(skip(tcx), level = "debug")]
 fn resolve_associated_item<'tcx>(
     tcx: TyCtxt<'tcx>,
     trait_item_id: DefId,
@@ -104,6 +105,7 @@ fn resolve_associated_item<'tcx>(
     debug!(?trait_item_id, ?param_env, ?trait_id, ?rcvr_substs, "resolve_associated_item");
 
     let trait_ref = ty::TraitRef::from_method(tcx, trait_id, rcvr_substs);
+    debug!(?trait_ref);
 
     let vtbl = match tcx.codegen_select_candidate((param_env, ty::Binder::dummy(trait_ref))) {
         Ok(vtbl) => vtbl,
@@ -120,6 +122,7 @@ fn resolve_associated_item<'tcx>(
         Err(CodegenObligationError::Unimplemented) => return Ok(None),
         Err(CodegenObligationError::FulfillmentError) => return Ok(None),
     };
+    debug!(?vtbl);
 
     // Now that we know which impl is being used, we can dispatch to
     // the actual function:

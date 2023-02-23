@@ -21,6 +21,7 @@ use std::mem::swap;
 ///
 /// The resulting structure still needs to be iterated to a fixed point, which
 /// can be done with propagate_to_fixpoint in cfg_propagate.
+#[instrument(skip(infcx, typeck_results, body, consumed_borrowed_places), level = "debug")]
 pub(super) fn build_control_flow_graph<'tcx>(
     infcx: &InferCtxt<'tcx>,
     typeck_results: &TypeckResults<'tcx>,
@@ -29,6 +30,8 @@ pub(super) fn build_control_flow_graph<'tcx>(
     body: &'tcx Body<'tcx>,
     num_exprs: usize,
 ) -> (DropRangesBuilder, FxHashSet<HirId>) {
+    debug!("consumed_borrowed_places: {:#?}", consumed_borrowed_places);
+
     let mut drop_range_visitor = DropRangeVisitor::new(
         infcx,
         typeck_results,
@@ -130,6 +133,7 @@ impl<'a, 'tcx> DropRangeVisitor<'a, 'tcx> {
         self.infcx.tcx
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn record_drop(&mut self, value: TrackedValue) {
         if self.places.borrowed.contains(&value) {
             debug!("not marking {:?} as dropped because it is borrowed at some point", value);
@@ -142,6 +146,7 @@ impl<'a, 'tcx> DropRangeVisitor<'a, 'tcx> {
 
     /// ExprUseVisitor's consume callback doesn't go deep enough for our purposes in all
     /// expressions. This method consumes a little deeper into the expression when needed.
+    #[instrument(skip(self), level = "debug")]
     fn consume_expr(&mut self, expr: &hir::Expr<'_>) {
         debug!("consuming expr {:?}, count={:?}", expr.kind, self.expr_index);
         let places = self
@@ -167,6 +172,7 @@ impl<'a, 'tcx> DropRangeVisitor<'a, 'tcx> {
     ///
     /// In the future, we will hopefully tighten up these rules to be more
     /// precise.
+    #[instrument(skip(self), level = "debug")]
     fn reinit_expr(&mut self, expr: &hir::Expr<'_>) {
         // Walk the expression to find the base. For example, in an expression
         // like `*a[i].x`, we want to find the `a` and mark that as
@@ -226,6 +232,7 @@ impl<'a, 'tcx> DropRangeVisitor<'a, 'tcx> {
     /// For an expression with an uninhabited return type (e.g. a function that returns !),
     /// this adds a self edge to the CFG to model the fact that the function does not
     /// return.
+    #[instrument(skip(self), level = "debug")]
     fn handle_uninhabited_return(&mut self, expr: &Expr<'tcx>) {
         let ty = self.typeck_results.expr_ty(expr);
         let ty = self.infcx.resolve_vars_if_possible(ty);
@@ -253,6 +260,7 @@ impl<'a, 'tcx> DropRangeVisitor<'a, 'tcx> {
     /// If the destination is an expression, this function will simply return that expression's
     /// hir_id. If the destination is a block, this function will return the hir_id of last
     /// expression in the block.
+    #[instrument(skip(self), level = "debug")]
     fn find_target_expression_from_destination(
         &self,
         destination: hir::Destination,
@@ -300,6 +308,7 @@ fn find_last_block_expression(block: &hir::Block<'_>) -> HirId {
 }
 
 impl<'a, 'tcx> Visitor<'tcx> for DropRangeVisitor<'a, 'tcx> {
+    #[instrument(skip(self), level = "debug")]
     fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) {
         let mut reinit = None;
         match expr.kind {
@@ -497,6 +506,7 @@ impl<'a, 'tcx> Visitor<'tcx> for DropRangeVisitor<'a, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn visit_pat(&mut self, pat: &'tcx hir::Pat<'tcx>) {
         intravisit::walk_pat(self, pat);
 

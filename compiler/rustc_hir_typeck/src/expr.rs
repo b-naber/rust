@@ -118,6 +118,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         ty
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub(super) fn check_expr_coercable_to_type(
         &self,
         expr: &'tcx hir::Expr<'tcx>,
@@ -1030,7 +1031,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
 
         let result_ty = coerce.complete(self);
-        if cond_ty.references_error() { self.tcx.ty_error() } else { result_ty }
+        if cond_ty.references_error() {
+            self.tcx.ty_error()
+        } else {
+            result_ty
+        }
     }
 
     /// Type check assignment expression `expr` of form `lhs = rhs`.
@@ -2301,7 +2306,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     && field.to_lowercase().starts_with(first_chars)
                     && field[1..].chars().all(|c| c.is_ascii_digit())
                 {
-                    if field.to_lowercase().starts_with(['f']) { Some("f32") } else { Some("f64") }
+                    if field.to_lowercase().starts_with(['f']) {
+                        Some("f32")
+                    } else {
+                        Some("f64")
+                    }
                 } else {
                     None
                 }

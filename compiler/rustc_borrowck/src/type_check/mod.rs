@@ -517,6 +517,7 @@ impl<'a, 'b, 'tcx> TypeVerifier<'a, 'b, 'tcx> {
 
     /// Checks that the types internal to the `place` match up with
     /// what would be expected.
+    #[instrument(skip(self), level = "debug")]
     fn sanitize_place(
         &mut self,
         place: &Place<'tcx>,
@@ -630,6 +631,7 @@ impl<'a, 'b, 'tcx> TypeVerifier<'a, 'b, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn sanitize_projection(
         &mut self,
         base: PlaceTy<'tcx>,
@@ -712,8 +714,10 @@ impl<'a, 'b, 'tcx> TypeVerifier<'a, 'b, 'tcx> {
                 let fty = self.cx.normalize(fty, location);
                 match self.field_ty(place, base, field, location) {
                     Ok(ty) => {
+                        debug!(?ty);
+                        debug!(?fty);
                         let ty = self.cx.normalize(ty, location);
-                        if let Err(terr) = self.cx.eq_types(
+                        if let Err(terr) = self.cx.sub_types(
                             ty,
                             fty,
                             location.to_locations(),
@@ -760,6 +764,7 @@ impl<'a, 'b, 'tcx> TypeVerifier<'a, 'b, 'tcx> {
         self.tcx().ty_error()
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn field_ty(
         &mut self,
         parent: &dyn fmt::Debug,
@@ -831,9 +836,15 @@ impl<'a, 'b, 'tcx> TypeVerifier<'a, 'b, 'tcx> {
                 }
             },
         };
+        debug!(?variant, ?substs);
 
         if let Some(field) = variant.fields.get(field.index()) {
-            Ok(self.cx.normalize(field.ty(tcx, substs), location))
+            debug!(?field);
+            let field_ty = Ok(self.cx.normalize(field.ty(tcx, substs), location));
+            if let Ok(ref field_ty) = field_ty {
+                debug!(?field_ty);
+            }
+            field_ty
         } else {
             Err(FieldAccessError::OutOfRange { field_count: variant.fields.len() })
         }

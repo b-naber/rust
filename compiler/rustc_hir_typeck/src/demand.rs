@@ -151,6 +151,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub fn demand_coerce(
         &self,
         expr: &hir::Expr<'tcx>,
@@ -602,9 +603,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         deref.span.until(base.span),
                         format!(
                             "{}({}",
-                            with_no_trimmed_paths!(
-                                self.tcx.def_path_str_with_substs(m.def_id, substs,)
-                            ),
+                            with_no_trimmed_paths!(self
+                                .tcx
+                                .def_path_str_with_substs(m.def_id, substs,)),
                             match self.tcx.fn_sig(m.def_id).input(0).skip_binder().kind() {
                                 ty::Ref(_, _, hir::Mutability::Mut) => "&mut ",
                                 ty::Ref(_, _, _) => "&",
@@ -1583,7 +1584,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             },
         ));
         let literal_is_ty_suffixed = |expr: &hir::Expr<'_>| {
-            if let hir::ExprKind::Lit(lit) = &expr.kind { lit.node.is_suffixed() } else { false }
+            if let hir::ExprKind::Lit(lit) = &expr.kind {
+                lit.node.is_suffixed()
+            } else {
+                false
+            }
         };
         let is_negative_int =
             |expr: &hir::Expr<'_>| matches!(expr.kind, hir::ExprKind::Unary(hir::UnOp::Neg, ..));

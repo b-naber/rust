@@ -523,7 +523,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // Sometimes macros mess up the spans, so do not normalize the
             // arg span to equal the error span, because that's less useful
             // than pointing out the arg expr in the wrong context.
-            if normalized_span.source_equal(error_span) { span } else { normalized_span }
+            if normalized_span.source_equal(error_span) {
+                span
+            } else {
+                normalized_span
+            }
         };
 
         // Precompute the provided types and spans, since that's all we typically need for below
@@ -776,9 +780,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // can be collated pretty easily if needed.
 
         // Next special case: if there is only one "Incompatible" error, just emit that
-        if let [
-            Error::Invalid(provided_idx, expected_idx, Compatibility::Incompatible(Some(err))),
-        ] = &errors[..]
+        if let [Error::Invalid(provided_idx, expected_idx, Compatibility::Incompatible(Some(err)))] =
+            &errors[..]
         {
             let (formal_ty, expected_ty) = formal_and_expected_inputs[*expected_idx];
             let (provided_ty, provided_arg_span) = provided_arg_tys[*provided_idx];
@@ -1282,6 +1285,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub fn check_decl_initializer(
         &self,
         hir_id: hir::HirId,
@@ -1295,6 +1299,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let ref_bindings = pat.contains_explicit_ref_binding();
 
         let local_ty = self.local_ty(init.span, hir_id).revealed_ty;
+        debug!(?local_ty);
+        debug!(?ref_bindings);
         if let Some(m) = ref_bindings {
             // Somewhat subtle: if we have a `ref` binding in the pattern,
             // we want to avoid introducing coercions for the RHS. This is
@@ -1312,9 +1318,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
     }
 
+    #[instrument(skip(self, decl), level = "debug")]
     pub(in super::super) fn check_decl(&self, decl: Declaration<'tcx>) {
         // Determine and write the type which we'll check the pattern against.
         let decl_ty = self.local_ty(decl.span, decl.hir_id).decl_ty;
+        debug!(?decl_ty);
         self.write_ty(decl.hir_id, decl_ty);
 
         // Type check the initializer.
@@ -1351,10 +1359,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     }
 
     /// Type check a `let` statement.
+    #[instrument(skip(self), level = "debug")]
     pub fn check_decl_local(&self, local: &'tcx hir::Local<'tcx>) {
         self.check_decl(local.into());
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub fn check_stmt(&self, stmt: &'tcx hir::Stmt<'tcx>, is_last: bool) {
         // Don't do all the complex logic below for `DeclItem`.
         match stmt.kind {
@@ -1524,25 +1534,21 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                     // Our block must be a `assign desugar local; assignment`
                                     if let Some(hir::Node::Block(hir::Block {
                                         stmts:
-                                            [
-                                                hir::Stmt {
-                                                    kind:
-                                                        hir::StmtKind::Local(hir::Local {
-                                                            source:
-                                                                hir::LocalSource::AssignDesugar(_),
-                                                            ..
-                                                        }),
-                                                    ..
-                                                },
-                                                hir::Stmt {
-                                                    kind:
-                                                        hir::StmtKind::Expr(hir::Expr {
-                                                            kind: hir::ExprKind::Assign(..),
-                                                            ..
-                                                        }),
-                                                    ..
-                                                },
-                                            ],
+                                            [hir::Stmt {
+                                                kind:
+                                                    hir::StmtKind::Local(hir::Local {
+                                                        source: hir::LocalSource::AssignDesugar(_),
+                                                        ..
+                                                    }),
+                                                ..
+                                            }, hir::Stmt {
+                                                kind:
+                                                    hir::StmtKind::Expr(hir::Expr {
+                                                        kind: hir::ExprKind::Assign(..),
+                                                        ..
+                                                    }),
+                                                ..
+                                            }],
                                         ..
                                     })) = self.tcx.hir().find(blk.hir_id)
                                     {

@@ -262,6 +262,7 @@ impl<'tcx> Cx<'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn make_mirror_unadjusted(&mut self, expr: &'tcx hir::Expr<'tcx>) -> Expr<'tcx> {
         let tcx = self.tcx;
         let expr_ty = self.typeck_results().expr_ty(expr);

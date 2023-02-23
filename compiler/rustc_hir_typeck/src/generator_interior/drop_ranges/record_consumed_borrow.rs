@@ -22,6 +22,7 @@ pub(super) fn find_consumed_and_borrowed<'a, 'tcx>(
     expr_use_visitor.places
 }
 
+#[derive(Debug)]
 pub(super) struct ConsumedAndBorrowedPlaces {
     /// Records the variables/expressions that are dropped by a given expression.
     ///
@@ -62,7 +63,9 @@ impl<'tcx> ExprUseDelegate<'tcx> {
         }
     }
 
+    #[instrument(skip(self, fcx, body), level = "debug")]
     fn consume_body(&mut self, fcx: &'_ FnCtxt<'_, 'tcx>, def_id: DefId, body: &'tcx Body<'tcx>) {
+        debug!("body: {:#?}", body);
         // Run ExprUseVisitor to find where values are consumed.
         ExprUseVisitor::new(
             self,
@@ -74,6 +77,7 @@ impl<'tcx> ExprUseDelegate<'tcx> {
         .consume_body(body);
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn mark_consumed(&mut self, consumer: HirId, target: TrackedValue) {
         self.places.consumed.entry(consumer).or_insert_with(|| <_>::default());
 
@@ -81,6 +85,7 @@ impl<'tcx> ExprUseDelegate<'tcx> {
         self.places.consumed.get_mut(&consumer).map(|places| places.insert(target));
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn borrow_place(&mut self, place_with_id: &expr_use_visitor::PlaceWithHirId<'tcx>) {
         self.places
             .borrowed
@@ -134,6 +139,7 @@ impl<'tcx> ExprUseDelegate<'tcx> {
 }
 
 impl<'tcx> expr_use_visitor::Delegate<'tcx> for ExprUseDelegate<'tcx> {
+    #[instrument(skip(self), level = "debug")]
     fn consume(
         &mut self,
         place_with_id: &expr_use_visitor::PlaceWithHirId<'tcx>,
@@ -155,6 +161,7 @@ impl<'tcx> expr_use_visitor::Delegate<'tcx> for ExprUseDelegate<'tcx> {
             .map_or((), |tracked_value| self.mark_consumed(parent, tracked_value));
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn borrow(
         &mut self,
         place_with_id: &expr_use_visitor::PlaceWithHirId<'tcx>,
@@ -169,6 +176,7 @@ impl<'tcx> expr_use_visitor::Delegate<'tcx> for ExprUseDelegate<'tcx> {
         self.borrow_place(place_with_id);
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn copy(
         &mut self,
         place_with_id: &expr_use_visitor::PlaceWithHirId<'tcx>,
@@ -184,6 +192,7 @@ impl<'tcx> expr_use_visitor::Delegate<'tcx> for ExprUseDelegate<'tcx> {
         // to borrowed_temporaries because the copy is consumed.
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn mutate(
         &mut self,
         assignee_place: &expr_use_visitor::PlaceWithHirId<'tcx>,
@@ -214,6 +223,7 @@ impl<'tcx> expr_use_visitor::Delegate<'tcx> for ExprUseDelegate<'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn bind(
         &mut self,
         binding_place: &expr_use_visitor::PlaceWithHirId<'tcx>,

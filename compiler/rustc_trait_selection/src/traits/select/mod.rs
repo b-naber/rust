@@ -173,6 +173,7 @@ struct TraitObligationStack<'prev, 'tcx> {
     dfn: usize,
 }
 
+#[derive(Debug)]
 struct SelectionCandidateSet<'tcx> {
     // A list of candidates that definitely apply to the current
     // obligation (meaning: types unify).
@@ -2867,7 +2868,11 @@ impl<'o, 'tcx> TraitObligationStackList<'o, 'tcx> {
     }
 
     fn depth(&self) -> usize {
-        if let Some(head) = self.head { head.depth } else { 0 }
+        if let Some(head) = self.head {
+            head.depth
+        } else {
+            0
+        }
     }
 }
 

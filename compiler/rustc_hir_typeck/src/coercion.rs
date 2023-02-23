@@ -110,7 +110,11 @@ fn coerce_mutbls<'tcx>(
     from_mutbl: hir::Mutability,
     to_mutbl: hir::Mutability,
 ) -> RelateResult<'tcx, ()> {
-    if from_mutbl >= to_mutbl { Ok(()) } else { Err(TypeError::Mutability) }
+    if from_mutbl >= to_mutbl {
+        Ok(())
+    } else {
+        Err(TypeError::Mutability)
+    }
 }
 
 /// Do not require any adjustments, i.e. coerce `x -> x`.
@@ -977,6 +981,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     /// adjusted type of the expression, if successful.
     /// Adjustments are only recorded if the coercion succeeded.
     /// The expressions *must not* have any pre-existing adjustments.
+    #[instrument(skip(self), level = "debug")]
     pub fn try_coerce(
         &self,
         expr: &hir::Expr<'_>,
@@ -1209,10 +1214,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         for expr in exprs {
             let expr = expr.as_coercion_site();
             let noop = match self.typeck_results.borrow().expr_adjustments(expr) {
-                &[
-                    Adjustment { kind: Adjust::Deref(_), .. },
-                    Adjustment { kind: Adjust::Borrow(AutoBorrow::Ref(_, mutbl_adj)), .. },
-                ] => {
+                &[Adjustment { kind: Adjust::Deref(_), .. }, Adjustment { kind: Adjust::Borrow(AutoBorrow::Ref(_, mutbl_adj)), .. }] =>
+                {
                     match *self.node_ty(expr.hir_id).kind() {
                         ty::Ref(_, _, mt_orig) => {
                             let mutbl_adj: hir::Mutability = mutbl_adj.into();

@@ -645,6 +645,7 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
         UniversalRegionIndices { indices: global_mapping.chain(subst_mapping).collect() }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn compute_inputs_and_output(
         &self,
         indices: &UniversalRegionIndices<'tcx>,
@@ -653,21 +654,31 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
         let tcx = self.infcx.tcx;
         match defining_ty {
             DefiningTy::Closure(def_id, substs) => {
+                debug!(?def_id);
+                debug!(?substs);
+                let closure_substs = substs.as_closure().split();
+                debug!(?closure_substs);
                 assert_eq!(self.mir_def.did.to_def_id(), def_id);
                 let closure_sig = substs.as_closure().sig();
+                debug!(?closure_sig);
                 let inputs_and_output = closure_sig.inputs_and_output();
+                debug!(?inputs_and_output);
                 let bound_vars = tcx.mk_bound_variable_kinds(
                     inputs_and_output
                         .bound_vars()
                         .iter()
                         .chain(iter::once(ty::BoundVariableKind::Region(ty::BrEnv))),
                 );
+                debug!(?bound_vars);
                 let br = ty::BoundRegion {
                     var: ty::BoundVar::from_usize(bound_vars.len() - 1),
                     kind: ty::BrEnv,
                 };
                 let env_region = ty::ReLateBound(ty::INNERMOST, br);
                 let closure_ty = tcx.closure_env_ty(def_id, substs, env_region).unwrap();
+                debug!(?br);
+                debug!(?env_region);
+                debug!(?closure_ty);
 
                 // The "inputs" of the closure in the
                 // signature appear as a tuple.  The MIR side
@@ -678,6 +689,7 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
                 let &ty::Tuple(inputs) = tuplized_inputs[0].kind() else {
                     bug!("closure inputs not a tuple: {:?}", tuplized_inputs[0]);
                 };
+                debug!(?inputs);
 
                 ty::Binder::bind_with_vars(
                     tcx.mk_type_list(

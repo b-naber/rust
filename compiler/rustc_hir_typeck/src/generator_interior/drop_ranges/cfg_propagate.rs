@@ -3,6 +3,7 @@ use rustc_index::{bit_set::BitSet, vec::IndexVec};
 use std::collections::BTreeMap;
 
 impl DropRangesBuilder {
+    #[instrument(skip(self), level = "debug")]
     pub fn propagate_to_fixpoint(&mut self) {
         trace!("before fixpoint: {:#?}", self);
         let preds = self.compute_predecessors();

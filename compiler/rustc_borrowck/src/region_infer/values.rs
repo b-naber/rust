@@ -317,26 +317,36 @@ impl<N: Idx> RegionValues<N> {
     }
 
     /// Returns just the universal regions that are contained in a given region's value.
+    #[instrument(skip(self), level = "debug")]
     pub(crate) fn universal_regions_outlived_by<'a>(
         &'a self,
         r: N,
     ) -> impl Iterator<Item = RegionVid> + 'a {
-        self.free_regions.row(r).into_iter().flat_map(|set| set.iter())
+        let regions_iter = self.free_regions.row(r).into_iter().flat_map(|set| set.iter());
+        let regions = regions_iter.collect::<Vec<_>>();
+        debug!("regions: {:#?}", regions);
+        regions.into_iter()
     }
 
     /// Returns all the elements contained in a given region's value.
+    #[instrument(skip(self), level = "debug")]
     pub(crate) fn placeholders_contained_in<'a>(
         &'a self,
         r: N,
     ) -> impl Iterator<Item = ty::PlaceholderRegion> + 'a {
-        self.placeholders
+        let placeholders_iter = self
+            .placeholders
             .row(r)
             .into_iter()
             .flat_map(|set| set.iter())
-            .map(move |p| self.placeholder_indices.lookup_placeholder(p))
+            .map(move |p| self.placeholder_indices.lookup_placeholder(p));
+        let placeholders = placeholders_iter.collect::<Vec<_>>();
+        debug!("placeholders: {:#?}", placeholders);
+        placeholders.into_iter()
     }
 
     /// Returns all the elements contained in a given region's value.
+    #[instrument(skip(self), level = "debug")]
     pub(crate) fn elements_contained_in<'a>(
         &'a self,
         r: N,
@@ -349,7 +359,10 @@ impl<N: Idx> RegionValues<N> {
         let placeholder_universes_iter =
             self.placeholders_contained_in(r).map(RegionElement::PlaceholderRegion);
 
-        points_iter.chain(free_regions_iter).chain(placeholder_universes_iter)
+        let elements_iter = points_iter.chain(free_regions_iter).chain(placeholder_universes_iter);
+        let elements = elements_iter.collect::<Vec<_>>();
+        debug!("elements contained in: {:#?}", elements);
+        elements.into_iter()
     }
 
     /// Returns a "pretty" string value of the region. Meant for debugging.

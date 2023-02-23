@@ -32,6 +32,7 @@ mod cfg_propagate;
 mod cfg_visualize;
 mod record_consumed_borrow;
 
+#[instrument(skip(fcx, body), level = "debug")]
 pub fn compute_drop_ranges<'a, 'tcx>(
     fcx: &'a FnCtxt<'a, 'tcx>,
     def_id: DefId,
@@ -54,11 +55,14 @@ pub fn compute_drop_ranges<'a, 'tcx>(
         drop_ranges.propagate_to_fixpoint();
 
         debug!("borrowed_temporaries = {borrowed_temporaries:?}");
-        DropRanges {
+        let drop_ranges = DropRanges {
             tracked_value_map: drop_ranges.tracked_value_map,
             nodes: drop_ranges.nodes,
             borrowed_temporaries: Some(borrowed_temporaries),
-        }
+        };
+
+        debug!("drop_ranges: {:#?}", drop_ranges);
+        drop_ranges
     } else {
         // If drop range tracking is not enabled, skip all the analysis and produce an
         // empty set of DropRanges.
@@ -79,6 +83,7 @@ pub fn compute_drop_ranges<'a, 'tcx>(
 /// result of `foo`. On the other hand, if `place` points to `x` then `f` will
 /// be called both on the `ExprKind::Path` node that represents the expression
 /// as well as the HirId of the local `x` itself.
+#[instrument(skip(hir, f), level = "debug")]
 fn for_each_consumable(hir: Map<'_>, place: TrackedValue, mut f: impl FnMut(TrackedValue)) {
     f(place);
     let node = hir.find(place.hir_id());
@@ -181,6 +186,7 @@ impl TryFrom<&PlaceWithHirId<'_>> for TrackedValue {
     }
 }
 
+#[derive(Debug)]
 pub struct DropRanges {
     tracked_value_map: FxHashMap<TrackedValue, TrackedValueIndex>,
     nodes: IndexVec<PostOrderId, NodeInfo>,
@@ -188,18 +194,28 @@ pub struct DropRanges {
 }
 
 impl DropRanges {
+    #[instrument(skip(self), level = "debug")]
     pub fn is_dropped_at(&self, hir_id: HirId, location: usize) -> bool {
-        self.tracked_value_map
+        let result = self
+            .tracked_value_map
             .get(&TrackedValue::Temporary(hir_id))
             .or(self.tracked_value_map.get(&TrackedValue::Variable(hir_id)))
             .cloned()
             .map_or(false, |tracked_value_id| {
                 self.expect_node(location.into()).drop_state.contains(tracked_value_id)
-            })
+            });
+
+        debug!(?result);
+        result
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub fn is_borrowed_temporary(&self, expr: &hir::Expr<'_>) -> bool {
-        if let Some(b) = &self.borrowed_temporaries { b.contains(&expr.hir_id) } else { true }
+        let result =
+            if let Some(b) = &self.borrowed_temporaries { b.contains(&expr.hir_id) } else { true };
+
+        debug!(?result);
+        result
     }
 
     /// Returns a reference to the NodeInfo for a node, panicking if it does not exist

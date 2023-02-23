@@ -54,9 +54,12 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // There are no compiler built-in rules for this.
         if obligation.polarity() == ty::ImplPolarity::Negative {
             self.assemble_candidates_for_trait_alias(obligation, &mut candidates);
+            debug!(?candidates);
             self.assemble_candidates_from_impls(obligation, &mut candidates);
+            debug!(?candidates);
         } else {
             self.assemble_candidates_for_trait_alias(obligation, &mut candidates);
+            debug!(?candidates);
 
             // Other bounds. Consider both in-scope bounds from fn decl
             // and applicable impls. There is a certain set of precedence rules here.
@@ -106,19 +109,28 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 }
 
                 if lang_items.gen_trait() == Some(def_id) {
+                    debug!("gen trait");
                     self.assemble_generator_candidates(obligation, &mut candidates);
+                    debug!(?candidates);
                 } else if lang_items.future_trait() == Some(def_id) {
                     self.assemble_future_candidates(obligation, &mut candidates);
+                    debug!(?candidates);
                 }
 
                 self.assemble_closure_candidates(obligation, &mut candidates);
+                debug!(?candidates);
                 self.assemble_fn_pointer_candidates(obligation, &mut candidates);
+                debug!(?candidates);
                 self.assemble_candidates_from_impls(obligation, &mut candidates);
+                debug!(?candidates);
                 self.assemble_candidates_from_object_ty(obligation, &mut candidates);
+                debug!(?candidates);
             }
 
             self.assemble_candidates_from_projected_tys(obligation, &mut candidates);
+            debug!(?candidates);
             self.assemble_candidates_from_caller_bounds(stack, &mut candidates)?;
+            debug!(?candidates);
             // Auto implementations have lower priority, so we only
             // consider triggering a default if there is no other impl that can apply.
             if candidates.vec.is_empty() {
@@ -219,6 +231,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn assemble_future_candidates(
         &mut self,
         obligation: &TraitObligation<'tcx>,
@@ -242,6 +255,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     /// Note: the type parameters on a closure candidate are modeled as *output* type
     /// parameters and hence do not affect whether this trait is a match or not. They will be
     /// unified during the confirmation step.
+    #[instrument(skip(self, candidates), level = "debug")]
     fn assemble_closure_candidates(
         &mut self,
         obligation: &TraitObligation<'tcx>,
@@ -250,6 +264,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         let Some(kind) = self.tcx().fn_trait_kind_from_def_id(obligation.predicate.def_id()) else {
             return;
         };
+        debug!(?kind);
 
         // Okay to skip binder because the substs on closure types never
         // touch bound regions, they just capture the in-scope
@@ -280,6 +295,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     }
 
     /// Implements one of the `Fn()` family for a fn pointer.
+    #[instrument(skip(self, candidates), level = "debug")]
     fn assemble_fn_pointer_candidates(
         &mut self,
         obligation: &TraitObligation<'tcx>,
@@ -548,7 +564,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             .ty()
             .unwrap();
 
-            if let ty::Dynamic(data, ..) = ty.kind() { data.principal() } else { None }
+            if let ty::Dynamic(data, ..) = ty.kind() {
+                data.principal()
+            } else {
+                None
+            }
         })
     }
 

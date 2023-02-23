@@ -235,6 +235,16 @@ pub struct ClosureSubstsParts<'tcx, T> {
     pub tupled_upvars_ty: T,
 }
 
+impl<'tcx> fmt::Debug for ClosureSubstsParts<'tcx, GenericArg<'tcx>> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str("ClosureSubstsParts {")?;
+        f.write_str(&format!("    parent_substs: {:?}", self.parent_substs))?;
+        f.write_str(&format!("    closure_kind: {:?}", self.closure_kind_ty))?;
+        f.write_str(&format!("    closure_sig_as_fn_ptr_ty: {:?}", self.closure_sig_as_fn_ptr_ty))?;
+        f.write_str(&format!("    tupled_upvars_ty: {:?}", self.tupled_upvars_ty))
+    }
+}
+
 impl<'tcx> ClosureSubsts<'tcx> {
     /// Construct `ClosureSubsts` from `ClosureSubstsParts`, containing `Substs`
     /// for the closure parent, alongside additional closure-specific components.
@@ -255,19 +265,16 @@ impl<'tcx> ClosureSubsts<'tcx> {
 
     /// Divides the closure substs into their respective components.
     /// The ordering assumed here must match that used by `ClosureSubsts::new` above.
-    fn split(self) -> ClosureSubstsParts<'tcx, GenericArg<'tcx>> {
+    pub fn split(self) -> ClosureSubstsParts<'tcx, GenericArg<'tcx>> {
         match self.substs[..] {
-            [
-                ref parent_substs @ ..,
-                closure_kind_ty,
-                closure_sig_as_fn_ptr_ty,
-                tupled_upvars_ty,
-            ] => ClosureSubstsParts {
-                parent_substs,
-                closure_kind_ty,
-                closure_sig_as_fn_ptr_ty,
-                tupled_upvars_ty,
-            },
+            [ref parent_substs @ .., closure_kind_ty, closure_sig_as_fn_ptr_ty, tupled_upvars_ty] => {
+                ClosureSubstsParts {
+                    parent_substs,
+                    closure_kind_ty,
+                    closure_sig_as_fn_ptr_ty,
+                    tupled_upvars_ty,
+                }
+            }
             _ => bug!("closure substs missing synthetics"),
         }
     }
@@ -1103,7 +1110,11 @@ impl<'tcx, T> Binder<'tcx, T> {
     where
         T: TypeVisitable<'tcx>,
     {
-        if self.0.has_escaping_bound_vars() { None } else { Some(self.skip_binder()) }
+        if self.0.has_escaping_bound_vars() {
+            None
+        } else {
+            Some(self.skip_binder())
+        }
     }
 
     pub fn no_bound_vars_ignoring_escaping(self, tcx: TyCtxt<'tcx>) -> Option<T>
@@ -1217,7 +1228,11 @@ impl<'tcx> FallibleTypeFolder<'tcx> for SkipBindersAt<'tcx> {
         &mut self,
         p: ty::Predicate<'tcx>,
     ) -> Result<ty::Predicate<'tcx>, Self::Error> {
-        if !p.has_escaping_bound_vars() { Ok(p) } else { p.try_super_fold_with(self) }
+        if !p.has_escaping_bound_vars() {
+            Ok(p)
+        } else {
+            p.try_super_fold_with(self)
+        }
     }
 }
 
@@ -1433,7 +1448,7 @@ impl<'tcx> Deref for Region<'tcx> {
 
     #[inline]
     fn deref(&self) -> &RegionKind<'tcx> {
-        &self.0.0
+        &self.0 .0
     }
 }
 
@@ -1573,7 +1588,7 @@ impl<'tcx> PolyExistentialProjection<'tcx> {
 /// Region utilities
 impl<'tcx> Region<'tcx> {
     pub fn kind(self) -> RegionKind<'tcx> {
-        *self.0.0
+        *self.0 .0
     }
 
     pub fn get_name(self) -> Option<Symbol> {
@@ -1729,12 +1744,12 @@ impl<'tcx> Region<'tcx> {
 impl<'tcx> Ty<'tcx> {
     #[inline(always)]
     pub fn kind(self) -> &'tcx TyKind<'tcx> {
-        &self.0.0
+        &self.0 .0
     }
 
     #[inline(always)]
     pub fn flags(self) -> TypeFlags {
-        self.0.0.flags
+        self.0 .0.flags
     }
 
     #[inline]
@@ -1785,7 +1800,11 @@ impl<'tcx> Ty<'tcx> {
 
     #[inline]
     pub fn is_phantom_data(self) -> bool {
-        if let Adt(def, _) = self.kind() { def.is_phantom_data() } else { false }
+        if let Adt(def, _) = self.kind() {
+            def.is_phantom_data()
+        } else {
+            false
+        }
     }
 
     #[inline]
@@ -2022,7 +2041,11 @@ impl<'tcx> Ty<'tcx> {
             type BreakTy = ();
 
             fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
-                if self.0 == t { ControlFlow::BREAK } else { t.super_visit_with(self) }
+                if self.0 == t {
+                    ControlFlow::BREAK
+                } else {
+                    t.super_visit_with(self)
+                }
             }
         }
 

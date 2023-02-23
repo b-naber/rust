@@ -147,6 +147,7 @@ pub(crate) struct AppliedMemberConstraint {
     pub(crate) member_constraint_index: NllMemberConstraintIndex,
 }
 
+#[derive(Debug)]
 pub(crate) struct RegionDefinition<'tcx> {
     /// What kind of variable is this -- a free region? existential
     /// variable? etc. (See the `NllRegionVariableOrigin` for more
@@ -252,8 +253,6 @@ fn sccs_info<'cx, 'tcx>(
 ) {
     use crate::renumber::RegionCtxt;
 
-    // FIXME(b-naber): Use all reg_vars in components_representatives too
-
     let var_to_origin = infcx.reg_var_to_origin.borrow();
 
     let mut var_to_origin_sorted = var_to_origin.clone().into_iter().collect::<Vec<_>>();
@@ -262,7 +261,7 @@ fn sccs_info<'cx, 'tcx>(
     for (reg_var, origin) in var_to_origin_sorted.into_iter() {
         debug_str.push_str(&format!("{:?}: {:?}\n", reg_var, origin));
     }
-    debug!("{}", debug_str);
+    debug!(debug_str);
 
     let num_components = sccs.scc_data.ranges.len();
     let mut components = vec![FxHashSet::default(); num_components];
@@ -273,11 +272,16 @@ fn sccs_info<'cx, 'tcx>(
         components[scc_idx.as_usize()].insert((reg_var, *origin));
     }
 
-    debug!("strongly connected components:");
+    let mut components_str = "strongly connected components:".to_string();
     for (scc_idx, reg_vars_origins) in components.iter().enumerate() {
         let regions_info = reg_vars_origins.clone().into_iter().collect::<Vec<_>>();
-        debug!("{:?}: {:?})", ConstraintSccIndex::from_usize(scc_idx), regions_info);
+        components_str.push_str(&format!(
+            "{:?}: {:?})",
+            ConstraintSccIndex::from_usize(scc_idx),
+            regions_info,
+        ))
     }
+    debug!(components_str);
 
     // calculate the best representative for each component
     let components_representatives = components
@@ -450,9 +454,14 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         // means that the `R1: !1` constraint will (later) cause
         // `R1` to become `'static`.
         for scc_a in constraint_sccs.all_sccs() {
-            for &scc_b in constraint_sccs.successors(scc_a) {
+            debug!(?scc_a);
+            let successors = constraint_sccs.successors(scc_a);
+            debug!("successors of {:?}: {:#?}", scc_a, successors);
+            for &scc_b in successors {
+                debug!("successor {:?} of {:?}", scc_a, scc_b);
                 let scc_universe_a = scc_universes[scc_a];
                 let scc_universe_b = scc_universes[scc_b];
+                debug!(?scc_universe_a, ?scc_universe_b);
                 let scc_universe_min = std::cmp::min(scc_universe_a, scc_universe_b);
                 if scc_universe_a != scc_universe_min {
                     scc_universes[scc_a] = scc_universe_min;
@@ -515,6 +524,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
     /// and (b) any universally quantified regions that it outlives,
     /// which in this case is just itself. R1 (`'b`) in contrast also
     /// outlives `'a` and hence contains R0 and R1.
+    #[instrument(skip(self), level = "debug")]
     fn init_free_and_bound_regions(&mut self) {
         // Update the names (if any)
         for (external_name, variable) in self.universal_regions.named_universal_regions() {
@@ -527,6 +537,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
 
         for variable in self.definitions.indices() {
             let scc = self.constraint_sccs.scc(variable);
+            debug!(?variable, ?scc);
 
             match self.definitions[variable].origin {
                 NllRegionVariableOrigin::FreeRegion => {
@@ -546,6 +557,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                     // can't just add it into `scc` unless the
                     // universe of the scc can name this region.
                     let scc_universe = self.scc_universes[scc];
+                    debug!(?placeholder, ?scc_universe);
                     if scc_universe.can_name(placeholder.universe) {
                         self.scc_values.add_element(scc, placeholder);
                     } else {
@@ -735,6 +747,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
 
         // Now take member constraints into account.
         let member_constraints = self.member_constraints.clone();
+        debug!(?member_constraints);
         for m_c_i in member_constraints.indices(scc_a) {
             self.apply_member_constraint(scc_a, m_c_i, member_constraints.choice_regions(m_c_i));
         }
@@ -1441,6 +1454,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         errors_buffer: &mut RegionErrors<'tcx>,
     ) {
         for (fr, fr_definition) in self.definitions.iter_enumerated() {
+            debug!(?fr, ?fr_definition);
             match fr_definition.origin {
                 NllRegionVariableOrigin::FreeRegion => {
                     // Go through each of the universal regions `fr` and check that
@@ -1580,6 +1594,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         errors_buffer: &mut RegionErrors<'tcx>,
     ) {
         let longer_fr_scc = self.constraint_sccs.scc(longer_fr);
+        debug!(?longer_fr_scc);
 
         // Because this free region must be in the ROOT universe, we
         // know it cannot contain any bound universes.
@@ -1593,6 +1608,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         // Note that the representative will be a universal region if there is
         // one in this SCC, so we will always check the representative here.
         let representative = self.scc_representatives[longer_fr_scc];
+        debug!(?representative);
         if representative != longer_fr {
             if let RegionRelationCheckResult::Error = self.check_universal_region_relation(
                 longer_fr,
@@ -1613,6 +1629,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         // (because `fr` includes `end(o)`).
         let mut error_reported = false;
         for shorter_fr in self.scc_values.universal_regions_outlived_by(longer_fr_scc) {
+            debug!(?shorter_fr);
             if let RegionRelationCheckResult::Error = self.check_universal_region_relation(
                 longer_fr,
                 shorter_fr,
@@ -1707,6 +1724,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         RegionRelationCheckResult::Error
     }
 
+    #[instrument(skip(self, errors_buffer), level = "debug")]
     fn check_bound_universal_region(
         &self,
         longer_fr: RegionVid,
@@ -1717,8 +1735,13 @@ impl<'tcx> RegionInferenceContext<'tcx> {
 
         let longer_fr_scc = self.constraint_sccs.scc(longer_fr);
         debug!("check_bound_universal_region: longer_fr_scc={:?}", longer_fr_scc,);
+        let elements = self.scc_values.elements_contained_in(longer_fr_scc);
+        let elements_vec = elements.collect::<Vec<_>>();
+        debug!("elements: {:#?}", elements_vec);
+        let elements = elements_vec.into_iter();
 
-        for error_element in self.scc_values.elements_contained_in(longer_fr_scc) {
+        for error_element in elements {
+            debug!(?error_element);
             match error_element {
                 RegionElement::Location(_) | RegionElement::RootUniversalRegion(_) => {}
                 // If we have some bound universal region `'a`, then the only
@@ -1731,11 +1754,13 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                 }
             }
 
-            errors_buffer.push(RegionErrorKind::BoundUniversalRegionError {
+            let err = RegionErrorKind::BoundUniversalRegionError {
                 longer_fr,
                 error_element,
                 placeholder,
-            });
+            };
+            debug!("pushing error: {:?}", err);
+            errors_buffer.push(err);
 
             // Stop after the first error, it gets too noisy otherwise, and does not provide more information.
             break;

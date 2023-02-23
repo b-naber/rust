@@ -6,7 +6,9 @@ use rustc_middle::ty::TyCtxt;
 pub struct Deaggregator;
 
 impl<'tcx> MirPass<'tcx> for Deaggregator {
+    #[instrument(skip(self, tcx, body), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+        debug!("body before deaggregation: {:#?}", body);
         let basic_blocks = body.basic_blocks.as_mut_preserves_cfg();
         for bb in basic_blocks {
             bb.expand_statements(|stmt| {
@@ -41,5 +43,6 @@ impl<'tcx> MirPass<'tcx> for Deaggregator {
                 ))
             });
         }
+        debug!("body after deaggregation: {:#?}", body);
     }
 }
