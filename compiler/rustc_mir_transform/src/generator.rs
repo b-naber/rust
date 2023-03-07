@@ -576,6 +576,7 @@ struct LivenessInfo {
     storage_liveness: IndexVec<BasicBlock, Option<BitSet<Local>>>,
 }
 
+#[instrument(skip(tcx, body), level = "debug")]
 fn locals_live_across_suspend_points<'tcx>(
     tcx: TyCtxt<'tcx>,
     body: &Body<'tcx>,
@@ -626,6 +627,7 @@ fn locals_live_across_suspend_points<'tcx>(
             liveness.seek_to_block_end(block);
             let mut live_locals: BitSet<_> = BitSet::new_empty(body.local_decls.len());
             live_locals.union(liveness.get());
+            debug!(?live_locals);
 
             if !movable {
                 // The `liveness` variable contains the liveness of MIR locals ignoring borrows.
@@ -639,7 +641,9 @@ fn locals_live_across_suspend_points<'tcx>(
                 // forever. Note that the final liveness is still bounded by the storage liveness
                 // of the local, which happens using the `intersect` operation below.
                 borrowed_locals_cursor.seek_before_primary_effect(loc);
-                live_locals.union(borrowed_locals_cursor.get());
+                let locals_borrowed = borrowed_locals_cursor.get();
+                debug!(?locals_borrowed);
+                live_locals.union(locals_borrowed);
             }
 
             // Store the storage liveness for later use so we can restore the state
@@ -663,6 +667,7 @@ fn locals_live_across_suspend_points<'tcx>(
             live_locals_at_any_suspension_point.union(&live_locals);
 
             live_locals_at_suspension_points.push(live_locals);
+            debug!(?live_locals_at_suspension_points);
             source_info_at_suspension_points.push(data.terminator().source_info);
         }
     }

@@ -91,13 +91,15 @@ where
                 }
             }
 
+            mir::Rvalue::Use(mir::Operand::Move(place)) => self.trans.kill(place.local),
+
             mir::Rvalue::Cast(..)
             | mir::Rvalue::ShallowInitBox(..)
-            | mir::Rvalue::Use(..)
             | mir::Rvalue::ThreadLocalRef(..)
             | mir::Rvalue::Repeat(..)
             | mir::Rvalue::Len(..)
             | mir::Rvalue::BinaryOp(..)
+            | mir::Rvalue::Use(..)
             | mir::Rvalue::CheckedBinaryOp(..)
             | mir::Rvalue::NullaryOp(..)
             | mir::Rvalue::UnaryOp(..)
