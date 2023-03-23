@@ -22,7 +22,7 @@ pub(crate) fn thir_flat(tcx: TyCtxt<'_>, owner_def: ty::WithOptConstParam<LocalD
     }
 }
 
-struct ThirPrinter<'a, 'tcx> {
+pub(crate) struct ThirPrinter<'a, 'tcx> {
     thir: &'a Thir<'tcx>,
     fmt: String,
 }
@@ -44,11 +44,11 @@ impl<'a, 'tcx> Write for ThirPrinter<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> ThirPrinter<'a, 'tcx> {
-    fn new(thir: &'a Thir<'tcx>) -> Self {
+    pub(crate) fn new(thir: &'a Thir<'tcx>) -> Self {
         Self { thir, fmt: String::new() }
     }
 
-    fn print(&mut self) {
+    pub(crate) fn print(&mut self) {
         print_indented!(self, "params: [", 0);
         for param in self.thir.params.iter() {
             self.print_param(param, 1);
@@ -60,7 +60,7 @@ impl<'a, 'tcx> ThirPrinter<'a, 'tcx> {
         self.print_expr(expr, 1);
     }
 
-    fn into_buffer(self) -> String {
+    pub(crate) fn into_buffer(self) -> String {
         self.fmt
     }
 

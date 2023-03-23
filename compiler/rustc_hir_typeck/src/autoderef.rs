@@ -28,6 +28,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         self.register_infer_ok_obligations(self.adjust_steps_as_infer_ok(autoderef))
     }
 
+    #[instrument(skip(self, autoderef), level = "debug")]
     pub fn adjust_steps_as_infer_ok(
         &self,
         autoderef: &Autoderef<'a, 'tcx>,
@@ -39,9 +40,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let steps: Vec<_> = steps
             .iter()
             .map(|&(source, kind)| {
+                debug!(?kind);
                 if let AutoderefKind::Overloaded = kind {
                     self.try_overloaded_deref(autoderef.span(), source).and_then(
                         |InferOk { value: method, obligations: o }| {
+                            debug!(?method);
                             obligations.extend(o);
                             if let ty::Ref(region, _, mutbl) = *method.sig.output().kind() {
                                 Some(OverloadedDeref { region, mutbl, span: autoderef.span() })

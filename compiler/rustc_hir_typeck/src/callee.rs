@@ -144,6 +144,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         match *adjusted_ty.kind() {
             ty::FnDef(..) | ty::FnPtr(_) => {
                 let adjustments = self.adjust_steps(autoderef);
+                debug!("adjustments: {:#?}", adjustments);
                 self.apply_adjustments(callee_expr, adjustments);
                 return Some(CallStep::Builtin(adjusted_ty));
             }
@@ -212,6 +213,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             .map(|(autoref, method)| {
                 let mut adjustments = self.adjust_steps(autoderef);
                 adjustments.extend(autoref);
+                debug!("adjustments: {:#?}", adjustments);
                 self.apply_adjustments(callee_expr, adjustments);
                 CallStep::Overloaded(method)
             })

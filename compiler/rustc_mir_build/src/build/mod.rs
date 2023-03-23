@@ -1,6 +1,7 @@
 pub(crate) use crate::build::expr::as_constant::lit_to_mir_constant;
 use crate::build::expr::as_place::PlaceBuilder;
 use crate::build::scope::DropKind;
+use crate::thir::print::ThirPrinter;
 use rustc_apfloat::ieee::{Double, Single};
 use rustc_apfloat::Float;
 use rustc_data_structures::fx::FxHashMap;
@@ -425,7 +426,7 @@ macro_rules! unpack {
 
 ///////////////////////////////////////////////////////////////////////////
 /// the main entry point for building MIR for a function
-
+#[instrument(skip(tcx, thir), level = "debug")]
 fn construct_fn<'tcx>(
     tcx: TyCtxt<'tcx>,
     fn_def: ty::WithOptConstParam<LocalDefId>,
@@ -433,6 +434,10 @@ fn construct_fn<'tcx>(
     expr: ExprId,
     fn_sig: ty::FnSig<'tcx>,
 ) -> Body<'tcx> {
+    let mut printer = ThirPrinter::new(&thir);
+    printer.print();
+    let thir_str = printer.into_buffer();
+    debug!("thir: {}", thir_str);
     let span = tcx.def_span(fn_def.did);
     let fn_id = tcx.hir().local_def_id_to_hir_id(fn_def.did);
     let generator_kind = tcx.generator_kind(fn_def.did);

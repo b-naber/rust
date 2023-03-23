@@ -65,6 +65,7 @@ pub(super) fn borrow_conflicts_with_place<'tcx>(
     place_components_conflict(tcx, body, borrow_place, borrow_kind, access_place, access, bias)
 }
 
+#[instrument(level = "debug", skip(tcx, body))]
 fn place_components_conflict<'tcx>(
     tcx: TyCtxt<'tcx>,
     body: &Body<'tcx>,
@@ -141,6 +142,7 @@ fn place_components_conflict<'tcx>(
         debug!(?borrow_c, ?access_c);
 
         let borrow_proj_base = &borrow_place.projection[..i];
+        debug!(?borrow_proj_base);
 
         // Borrow and access path both have more components.
         //
@@ -181,6 +183,7 @@ fn place_components_conflict<'tcx>(
                 return true;
             }
             Overlap::EqualOrDisjoint => {
+                debug!("equal or disjoint");
                 // This is the recursive case - proceed to the next element.
             }
             Overlap::Disjoint => {

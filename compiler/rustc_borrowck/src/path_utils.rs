@@ -25,6 +25,7 @@ pub(super) enum Control {
 }
 
 /// Encapsulates the idea of iterating over every borrow that involves a particular path
+#[instrument(skip(s, tcx, body, candidates, op), level = "debug")]
 pub(super) fn each_borrow_involving_path<'tcx, F, I, S>(
     s: &mut S,
     tcx: TyCtxt<'tcx>,
@@ -39,6 +40,8 @@ pub(super) fn each_borrow_involving_path<'tcx, F, I, S>(
     I: Iterator<Item = BorrowIndex>,
 {
     let (access, place) = access_place;
+    debug!(?access, ?place);
+    debug!("place.projection: {:#?}", place.projection);
 
     // FIXME: analogous code in check_loans first maps `place` to
     // its base_path.
@@ -47,6 +50,7 @@ pub(super) fn each_borrow_involving_path<'tcx, F, I, S>(
     // borrows of P, P.a.b, etc.
     for i in candidates {
         let borrowed = &borrow_set[i];
+        debug!(?borrowed);
 
         if places_conflict::borrow_conflicts_with_place(
             tcx,
@@ -63,6 +67,7 @@ pub(super) fn each_borrow_involving_path<'tcx, F, I, S>(
             );
             let ctrl = op(s, i, borrowed);
             if ctrl == Control::Break {
+                debug!("break");
                 return;
             }
         }

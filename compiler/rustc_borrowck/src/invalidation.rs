@@ -219,6 +219,7 @@ impl<'cx, 'tcx> Visitor<'tcx> for InvalidationGenerator<'cx, 'tcx> {
 
 impl<'cx, 'tcx> InvalidationGenerator<'cx, 'tcx> {
     /// Simulates mutation of a place.
+    #[instrument(skip(self), level = "debug")]
     fn mutate_place(&mut self, location: Location, place: Place<'tcx>, kind: AccessDepth) {
         self.access_place(
             location,

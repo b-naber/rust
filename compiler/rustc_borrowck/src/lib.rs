@@ -657,9 +657,11 @@ impl<'cx, 'tcx> rustc_mir_dataflow::ResultsVisitor<'cx, 'tcx> for MirBorrowckCtx
         let span = stmt.source_info.span;
 
         self.check_activations(location, span, flow_state);
+        debug!("stmt.kind: {:#?}", stmt.kind);
 
         match &stmt.kind {
             StatementKind::Assign(box (lhs, rhs)) => {
+                debug!(?lhs, ?rhs);
                 self.consume_rvalue(location, (rhs, span), flow_state);
 
                 self.mutate_place(location, (*lhs, span), Shallow(None), flow_state);
@@ -1027,6 +1029,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         flow_state: &Flows<'cx, 'tcx>,
     ) {
         let (sd, rw) = kind;
+        debug!(?sd, ?rw);
 
         if let Activation(_, borrow_index) = rw {
             if self.reservation_error_reported.contains(&place_span.0) {
@@ -1058,6 +1061,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
             flow_state,
             location,
         );
+        debug!(?mutability_error);
         let conflict_error =
             self.check_access_for_conflict(location, place_span, sd, rw, flow_state);
 
@@ -1098,102 +1102,107 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
             (sd, place_span.0),
             &borrow_set,
             borrows_in_scope,
-            |this, borrow_index, borrow| match (rw, borrow.kind) {
-                // Obviously an activation is compatible with its own
-                // reservation (or even prior activating uses of same
-                // borrow); so don't check if they interfere.
-                //
-                // NOTE: *reservations* do conflict with themselves;
-                // thus aren't injecting unsoundness w/ this check.)
-                (Activation(_, activating), _) if activating == borrow_index => {
-                    debug!(
-                        "check_access_for_conflict place_span: {:?} sd: {:?} rw: {:?} \
+            |this, borrow_index, borrow| {
+                debug!("inside op closure: borrow_index {:#?}, borrow: {:?}", borrow_index, borrow);
+                match (rw, borrow.kind) {
+                    // Obviously an activation is compatible with its own
+                    // reservation (or even prior activating uses of same
+                    // borrow); so don't check if they interfere.
+                    //
+                    // NOTE: *reservations* do conflict with themselves;
+                    // thus aren't injecting unsoundness w/ this check.)
+                    (Activation(_, activating), _) if activating == borrow_index => {
+                        debug!(
+                            "check_access_for_conflict place_span: {:?} sd: {:?} rw: {:?} \
                          skipping {:?} b/c activation of same borrow_index",
-                        place_span,
-                        sd,
-                        rw,
-                        (borrow_index, borrow),
-                    );
-                    Control::Continue
-                }
-
-                (Read(_), BorrowKind::Shared | BorrowKind::Shallow)
-                | (
-                    Read(ReadKind::Borrow(BorrowKind::Shallow)),
-                    BorrowKind::Unique | BorrowKind::Mut { .. },
-                ) => Control::Continue,
-
-                (Reservation(_), BorrowKind::Shallow | BorrowKind::Shared) => {
-                    // This used to be a future compatibility warning (to be
-                    // disallowed on NLL). See rust-lang/rust#56254
-                    Control::Continue
-                }
-
-                (Write(WriteKind::Move), BorrowKind::Shallow) => {
-                    // Handled by initialization checks.
-                    Control::Continue
-                }
-
-                (Read(kind), BorrowKind::Unique | BorrowKind::Mut { .. }) => {
-                    // Reading from mere reservations of mutable-borrows is OK.
-                    if !is_active(this.dominators(), borrow, location) {
-                        assert!(allow_two_phase_borrow(borrow.kind));
-                        return Control::Continue;
+                            place_span,
+                            sd,
+                            rw,
+                            (borrow_index, borrow),
+                        );
+                        Control::Continue
                     }
 
-                    error_reported = true;
-                    match kind {
-                        ReadKind::Copy => {
-                            let err = this
-                                .report_use_while_mutably_borrowed(location, place_span, borrow);
-                            this.buffer_error(err);
-                        }
-                        ReadKind::Borrow(bk) => {
-                            let err =
-                                this.report_conflicting_borrow(location, place_span, bk, borrow);
-                            this.buffer_error(err);
-                        }
-                    }
-                    Control::Break
-                }
+                    (Read(_), BorrowKind::Shared | BorrowKind::Shallow)
+                    | (
+                        Read(ReadKind::Borrow(BorrowKind::Shallow)),
+                        BorrowKind::Unique | BorrowKind::Mut { .. },
+                    ) => Control::Continue,
 
-                (Reservation(kind) | Activation(kind, _) | Write(kind), _) => {
-                    match rw {
-                        Reservation(..) => {
-                            debug!(
-                                "recording invalid reservation of \
+                    (Reservation(_), BorrowKind::Shallow | BorrowKind::Shared) => {
+                        // This used to be a future compatibility warning (to be
+                        // disallowed on NLL). See rust-lang/rust#56254
+                        Control::Continue
+                    }
+
+                    (Write(WriteKind::Move), BorrowKind::Shallow) => {
+                        // Handled by initialization checks.
+                        Control::Continue
+                    }
+
+                    (Read(kind), BorrowKind::Unique | BorrowKind::Mut { .. }) => {
+                        // Reading from mere reservations of mutable-borrows is OK.
+                        if !is_active(this.dominators(), borrow, location) {
+                            assert!(allow_two_phase_borrow(borrow.kind));
+                            return Control::Continue;
+                        }
+
+                        error_reported = true;
+                        match kind {
+                            ReadKind::Copy => {
+                                let err = this.report_use_while_mutably_borrowed(
+                                    location, place_span, borrow,
+                                );
+                                this.buffer_error(err);
+                            }
+                            ReadKind::Borrow(bk) => {
+                                let err = this
+                                    .report_conflicting_borrow(location, place_span, bk, borrow);
+                                this.buffer_error(err);
+                            }
+                        }
+                        Control::Break
+                    }
+
+                    (Reservation(kind) | Activation(kind, _) | Write(kind), _) => {
+                        match rw {
+                            Reservation(..) => {
+                                debug!(
+                                    "recording invalid reservation of \
                                  place: {:?}",
-                                place_span.0
-                            );
-                            this.reservation_error_reported.insert(place_span.0);
-                        }
-                        Activation(_, activating) => {
-                            debug!(
-                                "observing check_place for activation of \
+                                    place_span.0
+                                );
+                                this.reservation_error_reported.insert(place_span.0);
+                            }
+                            Activation(_, activating) => {
+                                debug!(
+                                    "observing check_place for activation of \
                                  borrow_index: {:?}",
-                                activating
-                            );
+                                    activating
+                                );
+                            }
+                            Read(..) | Write(..) => {}
                         }
-                        Read(..) | Write(..) => {}
-                    }
 
-                    error_reported = true;
-                    match kind {
-                        WriteKind::MutableBorrow(bk) => {
-                            let err =
-                                this.report_conflicting_borrow(location, place_span, bk, borrow);
-                            this.buffer_error(err);
+                        error_reported = true;
+                        match kind {
+                            WriteKind::MutableBorrow(bk) => {
+                                let err = this
+                                    .report_conflicting_borrow(location, place_span, bk, borrow);
+                                this.buffer_error(err);
+                            }
+                            WriteKind::StorageDeadOrDrop => this
+                                .report_storage_dead_or_drop_of_borrowed(
+                                    location, place_span, borrow,
+                                ),
+                            WriteKind::Mutate => this
+                                .report_illegal_mutation_of_borrowed(location, place_span, borrow),
+                            WriteKind::Move => {
+                                this.report_move_out_while_borrowed(location, place_span, borrow)
+                            }
                         }
-                        WriteKind::StorageDeadOrDrop => this
-                            .report_storage_dead_or_drop_of_borrowed(location, place_span, borrow),
-                        WriteKind::Mutate => {
-                            this.report_illegal_mutation_of_borrowed(location, place_span, borrow)
-                        }
-                        WriteKind::Move => {
-                            this.report_move_out_while_borrowed(location, place_span, borrow)
-                        }
+                        Control::Break
                     }
-                    Control::Break
                 }
             },
         );
@@ -1201,6 +1210,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         error_reported
     }
 
+    #[instrument(skip(self, flow_state), level = "debug")]
     fn mutate_place(
         &mut self,
         location: Location,
@@ -1220,6 +1230,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         );
     }
 
+    #[instrument(skip(self, flow_state), level = "debug")]
     fn consume_rvalue(
         &mut self,
         location: Location,
@@ -1228,6 +1239,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     ) {
         match rvalue {
             &Rvalue::Ref(_ /*rgn*/, bk, place) => {
+                debug!("Rvalue::Ref(bk: {:?}, place: {:?})", bk, place);
                 let access_kind = match bk {
                     BorrowKind::Shallow => {
                         (Shallow(Some(ArtificialField::ShallowBorrow)), Read(ReadKind::Borrow(bk)))
@@ -1242,6 +1254,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                         }
                     }
                 };
+                debug!(?access_kind);
 
                 self.access_place(
                     location,
@@ -1674,11 +1687,11 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 mpi,
             );
         } // Only query longest prefix with a MovePath, not further
-        // ancestors; dataflow recurs on children when parents
-        // move (to support partial (re)inits).
-        //
-        // (I.e., querying parents breaks scenario 7; but may want
-        // to do such a query based on partial-init feature-gate.)
+          // ancestors; dataflow recurs on children when parents
+          // move (to support partial (re)inits).
+          //
+          // (I.e., querying parents breaks scenario 7; but may want
+          // to do such a query based on partial-init feature-gate.)
     }
 
     /// Subslices correspond to multiple move paths, so we iterate through the
@@ -2149,15 +2162,18 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
 
     /// Whether this value can be written or borrowed mutably.
     /// Returns the root place if the place passed in is a projection.
+    #[instrument(skip(self), level = "debug")]
     fn is_mutable(
         &self,
         place: PlaceRef<'tcx>,
         is_local_mutation_allowed: LocalMutationIsAllowed,
     ) -> Result<RootPlace<'tcx>, PlaceRef<'tcx>> {
         debug!("is_mutable: place={:?}, is_local...={:?}", place, is_local_mutation_allowed);
+        debug!("place.projection: {:#?}", place.projection);
         match place.last_projection() {
             None => {
                 let local = &self.body.local_decls[place.local];
+                debug!(?local);
                 match local.mutability {
                     Mutability::Not => match is_local_mutation_allowed {
                         LocalMutationIsAllowed::Yes => Ok(RootPlace {
@@ -2182,11 +2198,14 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
             Some((place_base, elem)) => {
                 match elem {
                     ProjectionElem::Deref => {
+                        debug!("deref proj");
                         let base_ty = place_base.ty(self.body(), self.infcx.tcx).ty;
+                        debug!(?base_ty);
 
                         // Check the kind of deref to decide
                         match base_ty.kind() {
                             ty::Ref(_, _, mutbl) => {
+                                debug!(?mutbl);
                                 match mutbl {
                                     // Shared borrowed data is never mutable
                                     hir::Mutability::Not => Err(place),

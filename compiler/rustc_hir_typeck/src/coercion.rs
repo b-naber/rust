@@ -110,7 +110,11 @@ fn coerce_mutbls<'tcx>(
     from_mutbl: hir::Mutability,
     to_mutbl: hir::Mutability,
 ) -> RelateResult<'tcx, ()> {
-    if from_mutbl >= to_mutbl { Ok(()) } else { Err(TypeError::Mutability) }
+    if from_mutbl >= to_mutbl {
+        Ok(())
+    } else {
+        Err(TypeError::Mutability)
+    }
 }
 
 /// Do not require any adjustments, i.e. coerce `x -> x`.
@@ -304,6 +308,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
     /// Reborrows `&mut A` to `&mut B` and `&(mut) A` to `&B`.
     /// To match `A` with `B`, autoderef will be performed,
     /// calling `deref`/`deref_mut` where necessary.
+    #[instrument(skip(self), level = "debug")]
     fn coerce_borrowed_pointer(
         &self,
         a: Ty<'tcx>,
@@ -336,6 +341,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
         let mut found = None;
 
         for (referent_ty, autoderefs) in autoderef.by_ref() {
+            debug!(?referent_ty, ?autoderefs);
             if autoderefs == 0 {
                 // Don't let this pass, otherwise it would cause
                 // &T to autoref to &&T.
@@ -476,6 +482,8 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
             self.adjust_steps_as_infer_ok(&autoderef);
         obligations.extend(o);
         obligations.extend(autoderef.into_obligations());
+
+        debug!("adjustments: {:#?}", adjustments);
 
         // Now apply the autoref. We have to extract the region out of
         // the final ref type we got.
@@ -1211,10 +1219,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         for expr in exprs {
             let expr = expr.as_coercion_site();
             let noop = match self.typeck_results.borrow().expr_adjustments(expr) {
-                &[
-                    Adjustment { kind: Adjust::Deref(_), .. },
-                    Adjustment { kind: Adjust::Borrow(AutoBorrow::Ref(_, mutbl_adj)), .. },
-                ] => {
+                &[Adjustment { kind: Adjust::Deref(_), .. }, Adjustment { kind: Adjust::Borrow(AutoBorrow::Ref(_, mutbl_adj)), .. }] =>
+                {
                     match *self.node_ty(expr.hir_id).kind() {
                         ty::Ref(_, _, mt_orig) => {
                             let mutbl_adj: hir::Mutability = mutbl_adj.into();

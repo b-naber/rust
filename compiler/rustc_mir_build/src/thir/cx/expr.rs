@@ -49,6 +49,7 @@ impl<'tcx> Cx<'tcx> {
         trace!(?expr.ty);
 
         // Now apply adjustments, if any.
+        debug!("applying adjustments");
         if self.apply_adjustments {
             for adjustment in self.typeck_results.expr_adjustments(hir_expr) {
                 trace!(?expr, ?adjustment);
@@ -96,6 +97,7 @@ impl<'tcx> Cx<'tcx> {
         self.thir.exprs.push(expr)
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn apply_adjustment(
         &mut self,
         hir_expr: &'tcx hir::Expr<'tcx>,
@@ -103,6 +105,8 @@ impl<'tcx> Cx<'tcx> {
         adjustment: &Adjustment<'tcx>,
         mut span: Span,
     ) -> Expr<'tcx> {
+        debug!("hir_expr: {:#?}", hir_expr);
+        debug!("expr: {:#?}", expr);
         let Expr { temp_lifetime, .. } = expr;
 
         // Adjust the span from the block, to the last expression of the
@@ -136,9 +140,11 @@ impl<'tcx> Cx<'tcx> {
                 ExprKind::Deref { arg: self.thir.exprs.push(expr) }
             }
             Adjust::Deref(Some(deref)) => {
+                debug!("Adjust::Deref(overloaded deref: {:?})", deref);
                 // We don't need to do call adjust_span here since
                 // deref coercions always start with a built-in deref.
                 let call = deref.method_call(self.tcx(), expr.ty);
+                debug!(?call);
 
                 expr = Expr {
                     temp_lifetime,
@@ -263,6 +269,7 @@ impl<'tcx> Cx<'tcx> {
 
     #[instrument(level = "debug", skip(self), ret)]
     fn make_mirror_unadjusted(&mut self, expr: &'tcx hir::Expr<'tcx>) -> Expr<'tcx> {
+        debug!("hir expr: {:#?}", expr);
         let tcx = self.tcx;
         let expr_ty = self.typeck_results().expr_ty(expr);
         let expr_span = expr.span;
@@ -828,6 +835,7 @@ impl<'tcx> Cx<'tcx> {
         user_provided_type
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn method_callee(
         &mut self,
         expr: &hir::Expr<'_>,
@@ -843,6 +851,7 @@ impl<'tcx> Cx<'tcx> {
                     self.typeck_results().type_dependent_def(expr.hir_id).unwrap_or_else(|| {
                         span_bug!(expr.span, "no type-dependent def for method callee")
                     });
+                debug!(?kind, ?def_id);
                 let user_ty = self.user_substs_applied_to_res(expr.hir_id, Res::Def(kind, def_id));
                 debug!("method_callee: user_ty={:?}", user_ty);
                 (
@@ -981,6 +990,7 @@ impl<'tcx> Cx<'tcx> {
         }
     }
 
+    #[instrument(skip(self, expr), level = "debug")]
     fn overloaded_place(
         &mut self,
         expr: &'tcx hir::Expr<'tcx>,
@@ -989,6 +999,7 @@ impl<'tcx> Cx<'tcx> {
         args: Box<[ExprId]>,
         span: Span,
     ) -> ExprKind<'tcx> {
+        debug!("expr: {:#?}", expr);
         // For an overloaded *x or x[y] expression of type T, the method
         // call returns an &T and we must add the deref so that the types
         // line up (this is because `*x` and `x[y]` represent places):
@@ -1006,8 +1017,11 @@ impl<'tcx> Cx<'tcx> {
         let temp_lifetime =
             self.rvalue_scopes.temporary_scope(self.region_scope_tree, expr.hir_id.local_id);
         let fun = self.method_callee(expr, span, overloaded_callee);
+        debug!(?fun);
         let fun = self.thir.exprs.push(fun);
+        debug!(?fun);
         let fun_ty = self.thir[fun].ty;
+        debug!(?fun_ty);
         let ref_expr = self.thir.exprs.push(Expr {
             temp_lifetime,
             ty: ref_ty,
