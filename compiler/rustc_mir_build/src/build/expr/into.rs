@@ -1,6 +1,7 @@
 //! See docs in build/expr/mod.rs
 
 use crate::build::expr::category::{Category, RvalueFunc};
+use crate::build::ForGuard;
 use crate::build::{BlockAnd, BlockAndExtension, BlockFrame, Builder, NeedsTemporary};
 use rustc_ast::InlineAsmOptions;
 use rustc_data_structures::fx::FxHashMap;
@@ -509,8 +510,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 // Create a "fake" temporary variable so that we check that the
                 // value is Sized. Usually, this is caught in type checking, but
                 // in the case of box expr there is no such check.
+                let local_decl = LocalDecl::new(expr.ty, expr.span);
                 if !destination.projection.is_empty() {
-                    this.local_decls.push(LocalDecl::new(expr.ty, expr.span));
+                    this.local_decls.push(local_decl);
                 }
 
                 let place = unpack!(block = this.as_place(block, expr));
@@ -574,6 +576,41 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 this.cfg.push_assign(block, source_info, destination, rvalue);
                 block.unit()
             }
+            ExprKind::DerefMutArg { arg } => {
+                let thir_arg = &this.thir[arg];
+                debug!("thir_arg: {:#?}", thir_arg);
+
+                if let ExprKind::Scope { region_scope, lint_level, value } = thir_arg.kind {
+                    let source_info = this.source_info(expr.span);
+                    let region_scope = (region_scope, source_info);
+
+                    ensure_sufficient_stack(|| {
+                        this.in_scope(region_scope, lint_level, |this| {
+                            let expr = &this.thir[value];
+                            let ExprKind::Borrow { borrow_kind, arg} = expr.kind else {
+                                bug!("expected ExprKind::Borrow, found: {:?}", expr.kind);
+                            };
+
+                            if let ExprKind::VarRef { id } = this.thir[arg].kind {
+                                this.maybe_adjust_mutability(id, borrow_kind);
+                            };
+
+                            this.expr_into_dest(destination, block, expr)
+                        })
+                    })
+                } else {
+                    let expr = thir_arg;
+                    let ExprKind::Borrow { borrow_kind, arg} = expr.kind else {
+                            bug!("expected ExprKind::Borrow, found: {:?}", expr.kind);
+                        };
+
+                    if let ExprKind::VarRef { id } = this.thir[arg].kind {
+                        this.maybe_adjust_mutability(id, borrow_kind);
+                    };
+
+                    this.expr_into_dest(destination, block, expr)
+                }
+            }
         };
 
         if !expr_is_block_or_scope {
@@ -582,6 +619,30 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         }
 
         block_and
+    }
+
+    /// Sets the `Mutability` of the local variable corresponding to `id` to `mut` if
+    /// `borrow_kind` is `BorrowKind::Mut`. This is necessary to allow the following
+    /// to compile:
+    ///
+    /// ```
+    /// fn bar(y: RefMut<'_, u32>) {
+    ///     *y = 3;
+    /// }
+    /// ```
+    ///
+    /// We do not want to have to declare `y` as `mut` since `RefMut` implements `DerefMut`
+    /// and we want the behaviour of types that implement `DerefMut` to mirrow that of
+    /// mutable references.
+    fn maybe_adjust_mutability(&mut self, id: LocalVarId, borrow_kind: BorrowKind) {
+        let index = self.var_local_id(id, ForGuard::OutsideGuard);
+        let local_decl = &mut self.local_decls[index];
+        debug!(?local_decl);
+
+        // Automatically insert a `mut` for variables on which `DerefMut::deref_mut` is called
+        if let BorrowKind::Mut { .. } = borrow_kind {
+            local_decl.mutability = Mutability::Mut;
+        }
     }
 
     fn is_let(&self, expr: ExprId) -> bool {
