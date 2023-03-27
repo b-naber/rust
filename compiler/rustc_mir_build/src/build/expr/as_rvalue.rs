@@ -505,6 +505,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     unpack!(block = this.as_operand(block, scope, expr, None, NeedsTemporary::No));
                 block.and(Rvalue::Use(operand))
             }
+            ExprKind::DerefMutArg { .. } => bug!("encountered DerefMutArg as Rvalue"),
         }
     }
 
