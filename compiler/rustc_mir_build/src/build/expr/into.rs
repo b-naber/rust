@@ -1,6 +1,7 @@
 //! See docs in build/expr/mod.rs
 
 use crate::build::expr::category::{Category, RvalueFunc};
+use crate::build::ForGuard;
 use crate::build::{BlockAnd, BlockAndExtension, BlockFrame, Builder, NeedsTemporary};
 use rustc_ast::InlineAsmOptions;
 use rustc_data_structures::fx::FxHashMap;
@@ -509,8 +510,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 // Create a "fake" temporary variable so that we check that the
                 // value is Sized. Usually, this is caught in type checking, but
                 // in the case of box expr there is no such check.
+                let local_decl = LocalDecl::new(expr.ty, expr.span);
                 if !destination.projection.is_empty() {
-                    this.local_decls.push(LocalDecl::new(expr.ty, expr.span));
+                    this.local_decls.push(local_decl);
                 }
 
                 let place = unpack!(block = this.as_place(block, expr));
@@ -574,6 +576,70 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 this.cfg.push_assign(block, source_info, destination, rvalue);
                 block.unit()
             }
+            ExprKind::DerefMutArg { arg } => {
+                let thir_arg = &this.thir[arg];
+                debug!("thir_arg: {:#?}", thir_arg);
+
+                if let ExprKind::Scope { region_scope, lint_level, value } = thir_arg.kind {
+                    let source_info = this.source_info(expr.span);
+                    let region_scope = (region_scope, source_info);
+
+                    ensure_sufficient_stack(|| {
+                        this.in_scope(region_scope, lint_level, |this| {
+                            let expr = &this.thir[value];
+                            let ExprKind::Borrow { borrow_kind, arg} = expr.kind else {
+                                bug!("expected ExprKind::Borrow, found: {:?}", expr.kind);
+                            };
+
+                            let arg = &this.thir[arg];
+                            let borrow_kind = this.get_borrow_kind_for_deref_mut(arg, borrow_kind);
+
+                            // We don't do this in `as_rvalue` because we use `as_place`
+                            // for borrow expressions, so we cannot create an `RValue` that
+                            // remains valid across user code. `as_rvalue` is usually called
+                            // by this method anyway, so this shouldn't cause too many
+                            // unnecessary temporaries.
+                            let arg_place = match borrow_kind {
+                                // FIMXE(b-naber): Not sure whether we need mutability here
+                                BorrowKind::Shared | BorrowKind::DerefMut => {
+                                    unpack!(block = this.as_read_only_place(block, arg))
+                                }
+                                _ => unpack!(block = this.as_place(block, arg)),
+                            };
+
+                            let borrow =
+                                Rvalue::Ref(this.tcx.lifetimes.re_erased, borrow_kind, arg_place);
+                            this.cfg.push_assign(block, source_info, destination, borrow);
+                            block.unit()
+                        })
+                    })
+                } else {
+                    let expr = thir_arg;
+                    let ExprKind::Borrow { borrow_kind, arg} = expr.kind else {
+                            bug!("expected ExprKind::Borrow, found: {:?}", expr.kind);
+                        };
+
+                    let arg = &this.thir[arg];
+                    let borrow_kind = this.get_borrow_kind_for_deref_mut(arg, borrow_kind);
+
+                    // We don't do this in `as_rvalue` because we use `as_place`
+                    // for borrow expressions, so we cannot create an `RValue` that
+                    // remains valid across user code. `as_rvalue` is usually called
+                    // by this method anyway, so this shouldn't cause too many
+                    // unnecessary temporaries.
+                    let arg_place = match borrow_kind {
+                        // FIMXE(b-naber): Not sure whether we need mutability here
+                        BorrowKind::Shared | BorrowKind::DerefMut => {
+                            unpack!(block = this.as_read_only_place(block, arg))
+                        }
+                        _ => unpack!(block = this.as_place(block, arg)),
+                    };
+
+                    let borrow = Rvalue::Ref(this.tcx.lifetimes.re_erased, borrow_kind, arg_place);
+                    this.cfg.push_assign(block, source_info, destination, borrow);
+                    block.unit()
+                }
+            }
         };
 
         if !expr_is_block_or_scope {
@@ -582,6 +648,40 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         }
 
         block_and
+    }
+
+    /// Sets the `Mutability` of the local variable corresponding to `id` to `mut` if
+    /// `borrow_kind` is `BorrowKind::Mut`. This is necessary to allow the following
+    /// to compile:
+    ///
+    /// ```
+    /// fn bar(y: RefMut<'_, u32>) {
+    ///     *y = 3;
+    /// }
+    /// ```
+    ///
+    /// We do not want to have to declare `y` as `mut` since `RefMut` implements `DerefMut`
+    /// and we want the behaviour of types that implement `DerefMut` to mirrow that of
+    /// mutable references.
+    fn get_borrow_kind_for_deref_mut(
+        &mut self,
+        expr: &Expr<'tcx>,
+        borrow_kind: BorrowKind,
+    ) -> BorrowKind {
+        // Automatically insert a `mut` for variables on which `DerefMut::deref_mut` is called
+
+        if let ExprKind::VarRef { id } = expr.kind {
+            if let BorrowKind::Mut { .. } = borrow_kind {
+                let index = self.var_local_id(id, ForGuard::OutsideGuard);
+                let local_decl = &mut self.local_decls[index];
+
+                if local_decl.mutability != Mutability::Mut {
+                    return BorrowKind::DerefMut;
+                }
+            }
+        };
+
+        borrow_kind
     }
 
     fn is_let(&self, expr: ExprId) -> bool {

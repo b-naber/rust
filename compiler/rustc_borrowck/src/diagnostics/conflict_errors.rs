@@ -926,7 +926,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         // FIXME: supply non-"" `opt_via` when appropriate
         let first_borrow_desc;
         let mut err = match (gen_borrow_kind, issued_borrow.kind) {
-            (BorrowKind::Shared, BorrowKind::Mut { .. }) => {
+            (BorrowKind::Shared, BorrowKind::Mut { .. } | BorrowKind::DerefMut) => {
                 first_borrow_desc = "mutable ";
                 self.cannot_reborrow_already_borrowed(
                     span,
@@ -940,7 +940,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                     None,
                 )
             }
-            (BorrowKind::Mut { .. }, BorrowKind::Shared) => {
+            (BorrowKind::Mut { .. } | BorrowKind::DerefMut, BorrowKind::Shared) => {
                 first_borrow_desc = "immutable ";
                 let mut err = self.cannot_reborrow_already_borrowed(
                     span,
@@ -961,7 +961,10 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 err
             }
 
-            (BorrowKind::Mut { .. }, BorrowKind::Mut { .. }) => {
+            (
+                BorrowKind::Mut { .. } | BorrowKind::DerefMut,
+                BorrowKind::Mut { .. } | BorrowKind::DerefMut,
+            ) => {
                 first_borrow_desc = "first ";
                 let mut err = self.cannot_mutably_borrow_multiply(
                     span,
@@ -984,7 +987,10 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 self.cannot_uniquely_borrow_by_two_closures(span, &desc_place, issued_span, None)
             }
 
-            (BorrowKind::Mut { .. } | BorrowKind::Unique, BorrowKind::Shallow) => {
+            (
+                BorrowKind::Mut { .. } | BorrowKind::Unique | BorrowKind::DerefMut,
+                BorrowKind::Shallow,
+            ) => {
                 if let Some(immutable_section_description) =
                     self.classify_immutable_section(issued_borrow.assigned_place)
                 {
@@ -1051,7 +1057,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 )
             }
 
-            (BorrowKind::Mut { .. }, BorrowKind::Unique) => {
+            (BorrowKind::Mut { .. } | BorrowKind::DerefMut, BorrowKind::Unique) => {
                 first_borrow_desc = "first ";
                 self.cannot_reborrow_already_uniquely_borrowed(
                     span,
@@ -1072,7 +1078,8 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 BorrowKind::Mut { .. }
                 | BorrowKind::Unique
                 | BorrowKind::Shared
-                | BorrowKind::Shallow,
+                | BorrowKind::Shallow
+                | BorrowKind::DerefMut,
             ) => unreachable!(),
         };
 

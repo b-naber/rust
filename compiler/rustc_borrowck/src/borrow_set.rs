@@ -71,7 +71,7 @@ pub struct BorrowData<'tcx> {
 impl<'tcx> fmt::Display for BorrowData<'tcx> {
     fn fmt(&self, w: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match self.kind {
-            mir::BorrowKind::Shared => "",
+            mir::BorrowKind::Shared | mir::BorrowKind::DerefMut => "",
             mir::BorrowKind::Shallow => "shallow ",
             mir::BorrowKind::Unique => "uniq ",
             mir::BorrowKind::Mut { .. } => "mut ",

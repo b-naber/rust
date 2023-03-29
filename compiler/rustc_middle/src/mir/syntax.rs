@@ -227,6 +227,8 @@ pub enum BorrowKind {
         /// (i.e., `adjustment::Adjust::Borrow`).
         allow_two_phase_borrow: bool,
     },
+
+    DerefMut,
 }
 
 ///////////////////////////////////////////////////////////////////////////
