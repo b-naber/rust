@@ -13,6 +13,7 @@ use rustc_mir_dataflow::move_paths::MoveData;
 use std::fmt;
 use std::ops::Index;
 
+#[derive(Debug)]
 pub struct BorrowSet<'tcx> {
     /// The fundamental map relating bitvector indexes to the borrows
     /// in the MIR. Each borrow is also uniquely identified in the MIR
@@ -79,6 +80,7 @@ impl<'tcx> fmt::Display for BorrowData<'tcx> {
     }
 }
 
+#[derive(Debug)]
 pub enum LocalsStateAtExit {
     AllAreInvalidated,
     SomeAreInvalidated { has_storage_dead_or_moved: BitSet<Local> },
@@ -117,12 +119,15 @@ impl LocalsStateAtExit {
 }
 
 impl<'tcx> BorrowSet<'tcx> {
+    #[instrument(skip(tcx, body), level = "debug")]
     pub fn build(
         tcx: TyCtxt<'tcx>,
         body: &Body<'tcx>,
         locals_are_invalidated_at_exit: bool,
         move_data: &MoveData<'tcx>,
     ) -> Self {
+        debug!("move_data: {:#?}", move_data);
+
         let mut visitor = GatherBorrows {
             tcx,
             body: &body,
@@ -191,6 +196,7 @@ struct GatherBorrows<'a, 'tcx> {
 }
 
 impl<'a, 'tcx> Visitor<'tcx> for GatherBorrows<'a, 'tcx> {
+    #[instrument(skip(self), level = "debug")]
     fn visit_assign(
         &mut self,
         assigned_place: &mir::Place<'tcx>,
@@ -224,6 +230,7 @@ impl<'a, 'tcx> Visitor<'tcx> for GatherBorrows<'a, 'tcx> {
         self.super_assign(assigned_place, rvalue, location)
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn visit_local(&mut self, temp: Local, context: PlaceContext, location: Location) {
         if !context.is_use() {
             return;
@@ -271,6 +278,7 @@ impl<'a, 'tcx> Visitor<'tcx> for GatherBorrows<'a, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn visit_rvalue(&mut self, rvalue: &mir::Rvalue<'tcx>, location: mir::Location) {
         if let &mir::Rvalue::Ref(region, kind, place) = rvalue {
             // double-check that we already registered a BorrowData for this

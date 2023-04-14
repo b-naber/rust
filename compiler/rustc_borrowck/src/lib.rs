@@ -251,6 +251,7 @@ fn do_mir_borrowck<'tcx>(
     let locals_are_invalidated_at_exit = tcx.hir().body_owner_kind(def.did).is_fn_or_closure();
     let borrow_set =
         Rc::new(BorrowSet::build(tcx, body, locals_are_invalidated_at_exit, &mdpe.move_data));
+    debug!("borrow_set: {:#?}", borrow_set);
 
     let use_polonius = return_body_with_facts || infcx.tcx.sess.opts.unstable_opts.polonius;
 
@@ -298,6 +299,7 @@ fn do_mir_borrowck<'tcx>(
 
     let regioncx = Rc::new(regioncx);
 
+    debug!("calculating flow_borrows");
     let flow_borrows = Borrows::new(tcx, body, &regioncx, &borrow_set)
         .into_engine(tcx, body)
         .pass_name("borrowck")
@@ -632,6 +634,7 @@ struct MirBorrowckCtxt<'cx, 'tcx> {
 impl<'cx, 'tcx> rustc_mir_dataflow::ResultsVisitor<'cx, 'tcx> for MirBorrowckCtxt<'cx, 'tcx> {
     type FlowState = Flows<'cx, 'tcx>;
 
+    #[instrument(skip(self, flow_state), level = "debug")]
     fn visit_statement_before_primary_effect(
         &mut self,
         flow_state: &Flows<'cx, 'tcx>,
@@ -639,6 +642,7 @@ impl<'cx, 'tcx> rustc_mir_dataflow::ResultsVisitor<'cx, 'tcx> for MirBorrowckCtx
         location: Location,
     ) {
         debug!("MirBorrowckCtxt::process_statement({:?}, {:?}): {:?}", location, stmt, flow_state);
+        debug!("flow_state: {:#?}", flow_state);
         let span = stmt.source_info.span;
 
         self.check_activations(location, span, flow_state);
@@ -701,6 +705,7 @@ impl<'cx, 'tcx> rustc_mir_dataflow::ResultsVisitor<'cx, 'tcx> for MirBorrowckCtx
         }
     }
 
+    #[instrument(skip(self, flow_state), level = "debug")]
     fn visit_terminator_before_primary_effect(
         &mut self,
         flow_state: &Flows<'cx, 'tcx>,
@@ -995,6 +1000,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     /// access.
     ///
     /// Returns `true` if an error is reported.
+    #[instrument(skip(self, flow_state), level = "debug")]
     fn access_place(
         &mut self,
         location: Location,
@@ -1003,6 +1009,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         is_local_mutation_allowed: LocalMutationIsAllowed,
         flow_state: &Flows<'cx, 'tcx>,
     ) {
+        debug!("flow_state: {:#?}", flow_state);
         let (sd, rw) = kind;
 
         if let Activation(_, borrow_index) = rw {
@@ -1053,6 +1060,8 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         rw: ReadOrWrite,
         flow_state: &Flows<'cx, 'tcx>,
     ) -> bool {
+        debug!("flow_state: {:#?}", flow_state);
+
         let mut error_reported = false;
         let tcx = self.infcx.tcx;
         let body = self.body;
@@ -1449,12 +1458,14 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         }
     }
 
+    #[instrument(skip(self, flow_state), level = "debug")]
     fn consume_operand(
         &mut self,
         location: Location,
         (operand, span): (&'cx Operand<'tcx>, Span),
         flow_state: &Flows<'cx, 'tcx>,
     ) {
+        debug!("flow_state: {:#?}", flow_state);
         match *operand {
             Operand::Copy(place) => {
                 // copy of place: check if this is "copy of frozen path"
@@ -1651,11 +1662,11 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 mpi,
             );
         } // Only query longest prefix with a MovePath, not further
-        // ancestors; dataflow recurs on children when parents
-        // move (to support partial (re)inits).
-        //
-        // (I.e., querying parents breaks scenario 7; but may want
-        // to do such a query based on partial-init feature-gate.)
+          // ancestors; dataflow recurs on children when parents
+          // move (to support partial (re)inits).
+          //
+          // (I.e., querying parents breaks scenario 7; but may want
+          // to do such a query based on partial-init feature-gate.)
     }
 
     /// Subslices correspond to multiple move paths, so we iterate through the

@@ -71,6 +71,7 @@ impl<'tcx, T> Visitor<'tcx> for TransferFunction<'_, T>
 where
     T: GenKill<Local>,
 {
+    #[instrument(skip(self), level = "debug")]
     fn visit_statement(&mut self, stmt: &Statement<'tcx>, location: Location) {
         self.super_statement(stmt, location);
 
@@ -81,6 +82,7 @@ where
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn visit_rvalue(&mut self, rvalue: &mir::Rvalue<'tcx>, location: Location) {
         self.super_rvalue(rvalue, location);
 
@@ -109,6 +111,7 @@ where
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn visit_terminator(&mut self, terminator: &mir::Terminator<'tcx>, location: Location) {
         self.super_terminator(terminator, location);
 

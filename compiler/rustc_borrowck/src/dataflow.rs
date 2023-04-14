@@ -260,6 +260,7 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
 
     /// Add all borrows to the kill set, if those borrows are out of scope at `location`.
     /// That means they went out of a nonlexical scope
+    #[instrument(skip(self, trans), level = "debug")]
     fn kill_loans_out_of_scope_at_location(
         &self,
         trans: &mut impl GenKill<BorrowIndex>,
@@ -277,13 +278,19 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
         // region, then setting that gen-bit will override any
         // potential kill introduced here.
         if let Some(indices) = self.borrows_out_of_scope_at_location.get(&location) {
+            debug!(?indices);
+            for idx in indices.clone().iter() {
+                debug!("borrow: {:?}", &self.borrow_set[*idx]);
+            }
             trans.kill_all(indices.iter().copied());
         }
     }
 
     /// Kill any borrows that conflict with `place`.
+    #[instrument(skip(self, trans), level = "debug")]
     fn kill_borrows_on_place(&self, trans: &mut impl GenKill<BorrowIndex>, place: Place<'tcx>) {
         debug!("kill_borrows_on_place: place={:?}", place);
+        debug!("place.projections: {:#?}", place.projection);
 
         let other_borrows_of_local = self
             .borrow_set
@@ -292,6 +299,11 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
             .into_iter()
             .flat_map(|bs| bs.iter())
             .copied();
+
+        debug!("other borrows of local {:?}", place.local);
+        for borrow in other_borrows_of_local.clone() {
+            debug!(?borrow);
+        }
 
         // If the borrowed place is a local with no projections, all other borrows of this
         // local must conflict. This is purely an optimization so we don't have to call
@@ -317,6 +329,11 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
             )
         });
 
+        debug!("killing definitely_conflicting_borrows:");
+        for borrow in definitely_conflicting_borrows.clone() {
+            debug!(?borrow);
+        }
+
         trans.kill_all(definitely_conflicting_borrows);
     }
 }
@@ -340,6 +357,7 @@ impl<'tcx> rustc_mir_dataflow::AnalysisDomain<'tcx> for Borrows<'_, 'tcx> {
 impl<'tcx> rustc_mir_dataflow::GenKillAnalysis<'tcx> for Borrows<'_, 'tcx> {
     type Idx = BorrowIndex;
 
+    #[instrument(skip(self, trans), level = "debug")]
     fn before_statement_effect(
         &self,
         trans: &mut impl GenKill<Self::Idx>,
@@ -349,6 +367,7 @@ impl<'tcx> rustc_mir_dataflow::GenKillAnalysis<'tcx> for Borrows<'_, 'tcx> {
         self.kill_loans_out_of_scope_at_location(trans, location);
     }
 
+    #[instrument(skip(self, trans), level = "debug")]
     fn statement_effect(
         &self,
         trans: &mut impl GenKill<Self::Idx>,
@@ -397,6 +416,7 @@ impl<'tcx> rustc_mir_dataflow::GenKillAnalysis<'tcx> for Borrows<'_, 'tcx> {
         }
     }
 
+    #[instrument(skip(self, trans), level = "debug")]
     fn before_terminator_effect(
         &self,
         trans: &mut impl GenKill<Self::Idx>,
@@ -406,6 +426,7 @@ impl<'tcx> rustc_mir_dataflow::GenKillAnalysis<'tcx> for Borrows<'_, 'tcx> {
         self.kill_loans_out_of_scope_at_location(trans, location);
     }
 
+    #[instrument(skip(self, trans), level = "debug")]
     fn terminator_effect(
         &self,
         trans: &mut impl GenKill<Self::Idx>,

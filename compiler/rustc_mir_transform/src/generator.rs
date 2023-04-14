@@ -623,6 +623,7 @@ fn locals_live_across_suspend_points<'tcx>(
     for (block, data) in body.basic_blocks.iter_enumerated() {
         if let TerminatorKind::Yield { .. } = data.terminator().kind {
             let loc = Location { block, statement_index: data.statements.len() };
+            debug!(?loc);
 
             liveness.seek_to_block_end(block);
             let mut live_locals: BitSet<_> = BitSet::new_empty(body.local_decls.len());
@@ -703,6 +704,7 @@ fn locals_live_across_suspend_points<'tcx>(
 /// `GeneratorSavedLocal` is indexed in terms of the elements in this set;
 /// i.e. `GeneratorSavedLocal::new(1)` corresponds to the second local
 /// included in this set.
+#[derive(Debug)]
 struct GeneratorSavedLocals(BitSet<Local>);
 
 impl GeneratorSavedLocals {
@@ -902,6 +904,7 @@ fn sanitize_witness<'tcx>(
     }
 }
 
+#[instrument(skip(tcx, body, liveness), level = "debug")]
 fn compute_layout<'tcx>(
     tcx: TyCtxt<'tcx>,
     liveness: LivenessInfo,
@@ -918,6 +921,9 @@ fn compute_layout<'tcx>(
         storage_conflicts,
         storage_liveness,
     } = liveness;
+
+    debug!(?saved_locals);
+    debug!(?live_locals_at_suspension_points);
 
     // Gather live local types and their indices.
     let mut locals = IndexVec::<GeneratorSavedLocal, _>::new();
@@ -977,6 +983,7 @@ fn compute_layout<'tcx>(
         iter::repeat(IndexVec::new()).take(RESERVED_VARIANTS).collect();
     let mut remap = FxHashMap::default();
     for (suspension_point_idx, live_locals) in live_locals_at_suspension_points.iter().enumerate() {
+        debug!(?suspension_point_idx, ?live_locals);
         let variant_index = VariantIdx::from(RESERVED_VARIANTS + suspension_point_idx);
         let mut fields = IndexVec::new();
         for (idx, saved_local) in live_locals.iter().enumerate() {
@@ -995,7 +1002,7 @@ fn compute_layout<'tcx>(
 
     let layout =
         GeneratorLayout { field_tys: tys, variant_fields, variant_source_info, storage_conflicts };
-    debug!(?layout);
+    debug!("layout: {:#?}", layout);
 
     (remap, layout, storage_liveness)
 }
@@ -1433,7 +1440,9 @@ pub(crate) fn mir_generator_witnesses<'tcx>(
 }
 
 impl<'tcx> MirPass<'tcx> for StateTransform {
+    #[instrument(skip(self, tcx, body), level = "debug")]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+        debug!("body.source: {:?}", body.source);
         let Some(yield_ty) = body.yield_ty() else {
             // This only applies to generators
             return;
