@@ -583,6 +583,7 @@ fn locals_live_across_suspend_points<'tcx>(
     always_live_locals: &BitSet<Local>,
     movable: bool,
 ) -> LivenessInfo {
+    debug!("body: {:#?}", body);
     let body_ref: &Body<'_> = &body;
 
     // Calculate when MIR locals have live storage. This gives us an upper bound of their
@@ -650,13 +651,18 @@ fn locals_live_across_suspend_points<'tcx>(
             // Store the storage liveness for later use so we can restore the state
             // after a suspension point
             storage_live.seek_before_primary_effect(loc);
-            storage_liveness_map[block] = Some(storage_live.get().clone());
+            let current_storage_live = storage_live.get().clone();
+            debug!(?current_storage_live);
+            storage_liveness_map[block] = Some(current_storage_live);
+            debug!("storage_liveness_map: {:#?}", storage_liveness_map);
 
             // Locals live are live at this point only if they are used across
             // suspension points (the `liveness` variable)
             // and their storage is required (the `storage_required` variable)
             requires_storage_cursor.seek_before_primary_effect(loc);
-            live_locals.intersect(requires_storage_cursor.get());
+            let current_required_storage = requires_storage_cursor.get();
+            debug!(?current_required_storage);
+            live_locals.intersect(current_required_storage);
 
             // The generator argument is ignored.
             live_locals.remove(SELF_ARG);
@@ -666,6 +672,7 @@ fn locals_live_across_suspend_points<'tcx>(
             // Add the locals live at this suspension point to the set of locals which live across
             // any suspension points
             live_locals_at_any_suspension_point.union(&live_locals);
+            debug!(?live_locals_at_any_suspension_point);
 
             live_locals_at_suspension_points.push(live_locals);
             debug!(?live_locals_at_suspension_points);
