@@ -93,7 +93,11 @@ where
                 }
             }
 
-            mir::Rvalue::Use(mir::Operand::Move(place)) => self.trans.kill(place.local),
+            mir::Rvalue::Use(mir::Operand::Move(place)) => {
+                if place.projection.len() == 0 {
+                    self.trans.kill(place.local)
+                }
+            }
 
             mir::Rvalue::Cast(..)
             | mir::Rvalue::ShallowInitBox(..)

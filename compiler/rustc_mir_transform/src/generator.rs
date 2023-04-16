@@ -601,6 +601,8 @@ fn locals_live_across_suspend_points<'tcx>(
     let mut borrowed_locals_cursor =
         rustc_mir_dataflow::ResultsCursor::new(body_ref, &borrowed_locals_results);
 
+    debug!("after MaybeBorrowedLocals");
+
     // Calculate the MIR locals that we actually need to keep storage around
     // for.
     let requires_storage_results = MaybeRequiresStorage::new(body, &borrowed_locals_results)
@@ -623,13 +625,16 @@ fn locals_live_across_suspend_points<'tcx>(
 
     for (block, data) in body.basic_blocks.iter_enumerated() {
         if let TerminatorKind::Yield { .. } = data.terminator().kind {
+            debug!("Block {:?} with Yield", block);
             let loc = Location { block, statement_index: data.statements.len() };
             debug!(?loc);
 
             liveness.seek_to_block_end(block);
             let mut live_locals: BitSet<_> = BitSet::new_empty(body.local_decls.len());
+            debug!(?live_locals);
             live_locals.union(liveness.get());
             debug!(?live_locals);
+            debug!(?movable);
 
             if !movable {
                 // The `liveness` variable contains the liveness of MIR locals ignoring borrows.
@@ -646,6 +651,7 @@ fn locals_live_across_suspend_points<'tcx>(
                 let locals_borrowed = borrowed_locals_cursor.get();
                 debug!(?locals_borrowed);
                 live_locals.union(locals_borrowed);
+                debug!(?live_locals);
             }
 
             // Store the storage liveness for later use so we can restore the state
@@ -723,14 +729,18 @@ impl GeneratorSavedLocals {
 
     /// Transforms a `BitSet<Local>` that contains only locals saved across yield points to the
     /// equivalent `BitSet<GeneratorSavedLocal>`.
+    #[instrument(skip(self), level = "debug")]
     fn renumber_bitset(&self, input: &BitSet<Local>) -> BitSet<GeneratorSavedLocal> {
         assert!(self.superset(&input), "{:?} not a superset of {:?}", self.0, input);
         let mut out = BitSet::new_empty(self.count());
         for (saved_local, local) in self.iter_enumerated() {
+            debug!(?saved_local, ?local);
             if input.contains(local) {
                 out.insert(saved_local);
             }
         }
+
+        debug!(?out);
         out
     }
 
