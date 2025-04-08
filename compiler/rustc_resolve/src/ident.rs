@@ -1409,7 +1409,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         parent_scope: &ParentScope<'ra>,
         ignore_import: Option<Import<'ra>>,
     ) -> PathResult<'ra> {
-        self.resolve_path_with_ribs(path, opt_ns, parent_scope, None, None, None, ignore_import)
+        self.resolve_path(path, opt_ns, parent_scope, None, None, ignore_import)
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -1422,7 +1422,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ignore_binding: Option<NameBinding<'ra>>,
         ignore_import: Option<Import<'ra>>,
     ) -> PathResult<'ra> {
-        self.resolve_path_with_ribs(
+        self.resolve_path_with_ribs_outer(
             path,
             opt_ns,
             parent_scope,
@@ -1432,6 +1432,75 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             ignore_import,
         )
     }
+
+    #[instrument(level = "debug", skip(self, ribs))]
+    pub(crate) fn resolve_path_with_ribs_outer(
+        &mut self,
+        path: &[Segment],
+        opt_ns: Option<Namespace>, // `None` indicates a module path in import
+        parent_scope: &ParentScope<'ra>,
+        finalize: Option<Finalize>,
+        ribs: Option<&PerNS<Vec<Rib<'ra>>>>,
+        ignore_binding: Option<NameBinding<'ra>>,
+        ignore_import: Option<Import<'ra>>,
+    ) -> PathResult<'ra> {
+        let path_resolution = self.resolve_path_with_ribs(
+            path,
+            opt_ns,
+            parent_scope,
+            finalize,
+            ribs,
+            ignore_binding,
+            ignore_import,
+        );
+        debug!("path_resolution: {:?}", path_resolution);
+
+        // If path resolution fails we try again with a namespaced crate name (RFC 3243)
+        // FIXME I think this is a fundamental problem with the approach. What if we have
+        // a crate foo with a module bar and a crate foo:bar. Then we import `foo::bar`
+        // and later use the path `foo::bar::utils::some_func`, which is then resolved to
+        // the function of the module bar in foo?
+        if let PathResult::Failed { .. } = path_resolution {
+            // Check if we have an open namespace crate name
+            if path.len() >= 2 {
+                let root = path[0].ident;
+
+                if root.name != kw::SelfLower
+                    && root.name != kw::SelfUpper
+                    && root.name != kw::PathRoot
+                    && root.name != kw::Crate
+                    && root.name != kw::DollarCrate
+                {
+                    let ident =
+                        Ident::from_str(&format!("{}::{}", root.as_str(), path[1].ident.as_str()));
+                    let namespaced_segment = Segment::from_ident(ident);
+                    let path = std::iter::once(namespaced_segment)
+                        .chain(path[2..].iter().cloned())
+                        .collect::<Vec<Segment>>();
+
+                    let namespaced_crate_resolution = self.resolve_path_with_ribs(
+                        &path,
+                        opt_ns,
+                        parent_scope,
+                        finalize,
+                        ribs,
+                        ignore_binding,
+                        ignore_import,
+                    );
+                    debug!(?namespaced_crate_resolution);
+
+                    if let PathResult::Failed { .. } = namespaced_crate_resolution {
+                        return path_resolution;
+                    } else {
+                        return namespaced_crate_resolution;
+                    }
+                }
+            }
+        }
+
+        path_resolution
+    }
+
 
     pub(crate) fn resolve_path_with_ribs(
         &mut self,

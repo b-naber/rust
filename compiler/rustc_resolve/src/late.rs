@@ -1499,7 +1499,7 @@ impl<'a, 'ast, 'ra: 'ast, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
         opt_ns: Option<Namespace>, // `None` indicates a module path in import
         finalize: Option<Finalize>,
     ) -> PathResult<'ra> {
-        self.r.resolve_path_with_ribs(
+        self.r.resolve_path_with_ribs_outer(
             path,
             opt_ns,
             &self.parent_scope,
