@@ -34,7 +34,7 @@ use rustc_session::search_paths::PathKind;
 use rustc_span::edition::Edition;
 use rustc_span::{DUMMY_SP, Ident, Span, Symbol, sym};
 use rustc_target::spec::{PanicStrategy, Target, TargetTuple};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, instrument};
 
 use crate::errors;
 use crate::locator::{CrateError, CrateLocator, CratePaths};
@@ -752,6 +752,16 @@ impl<'a, 'tcx> CrateLoader<'a, 'tcx> {
             }
         }
     }
+
+    // Looks up whether a crate exists, but doesn't error if it does not.
+    #[instrument(level="debug", skip(self))]
+    pub fn try_resolve_extern_crate(&mut self, name: Symbol) -> Option<CrateNum> {
+        match self.maybe_resolve_crate(name, CrateDepKind::Explicit, CrateOrigin::Extern) {
+            Ok(crate_num) => Some(crate_num),
+            Err(..) => None,
+        }
+    }
+    
 
     fn maybe_resolve_crate<'b>(
         &'b mut self,
