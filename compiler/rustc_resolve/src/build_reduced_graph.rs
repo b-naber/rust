@@ -526,6 +526,42 @@ impl<'a, 'ra, 'tcx> BuildReducedGraphVisitor<'a, 'ra, 'tcx> {
         };
         match use_tree.kind {
             ast::UseTreeKind::Simple(rename) => {
+                // Namespaced crate names (RFC 3243) pose a problem for import resolution.
+                // Suppose we have an import of the form `use foo::bar`. This import could either
+                // correspond to an import of the module `bar` of the crate `foo` or an
+                // import of the crate `foo::bar`. We have to decide which module path is used
+                // for an import before it is interned. To determine this we look up whether any
+                // crate with the name `foo::bar` can be resolved. If it can we assume
+                // that `foo::bar` corresponds to the import of the crate named `foo::bar`.
+                if prefix.len() == 2 {
+                    let crate_name =
+                        Symbol::intern(&format!("{}::{}", prefix[0].ident, prefix[1].ident));
+
+                    let crate_num = self.r.crate_loader(|c| c.try_resolve_extern_crate(crate_name));
+                    if crate_num.is_some() {
+                        let kind = ImportKind::Single {
+                            source: Ident::new(crate_name, root_span),
+                            target: Ident::new(crate_name, root_span),
+                            source_bindings: PerNS {
+                                type_ns: Cell::new(Err(Determinacy::Undetermined)),
+                                value_ns: Cell::new(Err(Determinacy::Undetermined)),
+                                macro_ns: Cell::new(Err(Determinacy::Undetermined)),
+                            },
+                            target_bindings: PerNS {
+                                type_ns: Cell::new(None),
+                                value_ns: Cell::new(None),
+                                macro_ns: Cell::new(None),
+                            },
+                            type_ns_only: false,
+                            nested,
+                            id,
+                        };
+
+                        self.add_import(vec![], kind, use_tree.span, item, root_span, item.id, vis);
+                        return;
+                    }
+                }
+
                 let mut ident = use_tree.ident();
                 let mut module_path = prefix;
                 let mut source = module_path.pop().unwrap();
