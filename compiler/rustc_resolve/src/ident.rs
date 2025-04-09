@@ -436,6 +436,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             parent_scope,
             orig_ident.span.ctxt(),
             |this, scope, use_prelude, ctxt| {
+                debug!(?scope);
                 let ident = Ident::new(orig_ident.name, orig_ident.span.with_ctxt(ctxt));
                 let result = match scope {
                     Scope::DeriveHelpers(expn_id) => {
@@ -506,6 +507,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
+                        debug!(?binding);
                         match binding {
                             Ok(binding) => Ok((binding, Flags::MODULE | Flags::MISC_SUGGEST_CRATE)),
                             Err((Determinacy::Undetermined, Weak::No)) => {
@@ -533,6 +535,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
+                        debug!(?binding);
                         match binding {
                             Ok(binding) => {
                                 if let Some(lint_id) = derive_fallback_lint_id {
@@ -578,7 +581,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         None => Err(Determinacy::Determined),
                     },
                     Scope::ExternPrelude => {
-                        match this.extern_prelude_get(ident, finalize.is_some()) {
+                        match this.extern_prelude_get(
+                            ident,
+                            finalize.is_some(),
+                            Some(*parent_scope),
+                        ) {
                             Some(binding) => Ok((binding, Flags::empty())),
                             None => Err(Determinacy::determined(
                                 this.graph_root.unexpanded_invocations.borrow().is_empty(),
@@ -834,7 +841,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 assert_eq!(shadowing, Shadowing::Unrestricted);
                 return if ns != TypeNS {
                     Err((Determined, Weak::No))
-                } else if let Some(binding) = self.extern_prelude_get(ident, finalize.is_some()) {
+                } else if let Some(binding) =
+                    self.extern_prelude_get(ident, finalize.is_some(), Some(*parent_scope))
+                {
                     Ok(binding)
                 } else if !self.graph_root.unexpanded_invocations.borrow().is_empty() {
                     // Macro-expanded `extern crate` items can add names to extern prelude.
@@ -870,8 +879,55 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         };
 
         let key = BindingKey::new(ident, ns);
-        let resolution =
-            self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
+        debug!("trying to resolve {:?} in module {:?}", ident, module);
+        let res = self.resolution(module, key).try_borrow();
+        debug!("res: {:?}", res);
+        drop(res);
+
+        let resolution_result = self.resolution(module, key).try_borrow_mut().map_err(|_| {
+            debug!("got resolution error for module {:?}", module);
+            (Determined, Weak::No)
+        }); // This happens when there is a cycle of imports.
+
+        // If resolution failed for the module, check if we can resolve ident to a namespaced crate.
+        // Suppose we have the crate `my_api` and the namespaced crate `my_api::utils` as dependencies
+        // and `my_api` doesn't have a module named `utils`. The `Ident` `utils` will be unresolvable
+        // for the `Module` corresponding `my_api`. If there's a crate named `my_api::utils` in the extern
+        // prelude we resolve `my_api::utils` to that crate then. If `my_api` does have a module
+        // named `utils` and a namespaced crate `my_api::utils` exists, then we report a name conflict error
+        // (via `build_reduced_graph_external`).
+        let resolution = if let Err(err) = resolution_result {
+            if let Some(module_name) = module.kind.name() {
+                let Some(namespaced_crate_names) =
+                    self.namespaced_crate_names.get(module_name.as_str())
+                else {
+                    return Err(err);
+                };
+
+                debug!(?namespaced_crate_names);
+                for namespaced_crate_name in namespaced_crate_names {
+                    if namespaced_crate_name
+                        .split("::")
+                        .nth(1)
+                        .expect("namespaced crate name has wrong form")
+                        == ident.as_str()
+                    {
+                        return self.resolve_namespaced_crate(
+                            namespaced_crate_name,
+                            finalize,
+                            module.parent.map(|m| ParentScope::module(m, self)),
+                        );
+                    }
+                }
+
+                return Err(err);
+            } else {
+                return Err(err);
+            }
+        } else {
+            resolution_result.unwrap()
+        };
+        debug!(?resolution);
 
         // If the primary binding is unusable, search further and return the shadowed glob
         // binding if it exists. What we really want here is having two separate scopes in
@@ -932,6 +988,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
         let check_usable = |this: &mut Self, binding: NameBinding<'ra>| {
             let usable = this.is_accessible_from(binding.vis, parent_scope.module);
+            debug!(?usable);
             if usable { Ok(binding) } else { Err((Determined, Weak::No)) }
         };
 
@@ -947,6 +1004,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         // Check if one of single imports can still define the name,
         // if it can then our result is not determined and can be invalidated.
         for single_import in &resolution.single_imports {
+            debug!("single_import: {:?}", single_import);
             if ignore_import == Some(*single_import) {
                 // This branch handles a cycle in single imports.
                 //
@@ -1037,6 +1095,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             }
         }
 
+        debug!("no resolution");
         // --- From now on we have no resolution. ---
 
         // Now we are in situation when new item/import can appear only from a glob or a macro
@@ -1101,6 +1160,22 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
         // No resolution and no one else can define the name - determinate error.
         Err((Determined, Weak::No))
+    }
+
+    // Resolves `namespaced_crate_name` to the crate with that name.
+    #[instrument(skip(self, finalize))]
+    fn resolve_namespaced_crate(
+        &mut self,
+        namespaced_crate_name: &str,
+        finalize: Option<Finalize>,
+        parent_scope: Option<ParentScope<'ra>>,
+    ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
+        self.extern_prelude_get(
+            Ident::from_str(namespaced_crate_name),
+            finalize.is_some(),
+            parent_scope,
+        )
+        .ok_or((Determinacy::Determined, Weak::No))
     }
 
     /// Validate a local resolution (from ribs).
@@ -1553,6 +1628,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 );
             }
 
+            debug!(?module);
             let binding = if let Some(module) = module {
                 self.resolve_ident_in_module(
                     module,
@@ -1600,6 +1676,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 )
             };
 
+            debug!("resolve_path_with_ribs binding: {:?}", binding);
             match binding {
                 Ok(binding) => {
                     if segment_idx == 1 {

@@ -23,8 +23,8 @@ use rustc_middle::metadata::ModChild;
 use rustc_middle::ty::Feed;
 use rustc_middle::{bug, ty};
 use rustc_span::hygiene::{ExpnId, LocalExpnId, MacroKind};
-use rustc_span::{Ident, Span, Symbol, kw, sym};
-use tracing::debug;
+use rustc_span::{DUMMY_SP, Ident, Span, Symbol, kw, sym};
+use tracing::{debug, instrument};
 
 use crate::Namespace::{MacroNS, TypeNS, ValueNS};
 use crate::def_collector::collect_definitions;
@@ -70,11 +70,13 @@ impl<'ra, Id: Into<DefId>> ToNameBinding<'ra> for (Res, ty::Visibility<Id>, Span
 impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     /// Defines `name` in namespace `ns` of module `parent` to be `def` if it is not yet defined;
     /// otherwise, reports an error.
+    #[instrument(level = "debug", skip(self, def))]
     pub(crate) fn define<T>(&mut self, parent: Module<'ra>, ident: Ident, ns: Namespace, def: T)
     where
         T: ToNameBinding<'ra>,
     {
         let binding = def.to_name_binding(self.arenas);
+        debug!(?binding);
         let key = self.new_disambiguated_key(ident, ns);
         if let Err(old_binding) = self.try_define(parent, key, binding, false) {
             self.report_conflict(parent, ident, ns, old_binding, binding);
@@ -196,14 +198,50 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         visitor.parent_scope.macro_rules
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub(crate) fn build_reduced_graph_external(&mut self, module: Module<'ra>) {
+        // Check if `module` is the main crate name for a namespaced crate
+        // (i.e. `my_api` for the namespaced crates `my_api::utils` and `my_api::core`),
+        // and process the extern crate for the namespaced crates if they exist.
+        if let Some(module_name) = module.kind.name() {
+            let namespace_crate_name = self
+                .namespaced_crate_names
+                .get(module_name.as_str())
+                .map(|names| names.iter().map(|s| s.to_string().clone()).collect::<Vec<String>>());
+
+            if let Some(namespaced_crate_names) = namespace_crate_name {
+                debug!(?namespaced_crate_names);
+                for namespaced_crate_name in namespaced_crate_names {
+                    let crate_id = self.crate_loader(|c| {
+                        c.maybe_process_path_extern(Symbol::intern(&namespaced_crate_name)).expect(
+                            &format!("no crate_num for namespaced crate {}", namespaced_crate_name),
+                        )
+                    });
+
+                    let crate_root = self.expect_module(crate_id.as_def_id());
+                    let ident = Ident::from_str(
+                        namespaced_crate_name
+                            .split("::")
+                            .nth(1)
+                            .expect("namespaced crate name has unexpected form"),
+                    );
+                    let parent_scope = ParentScope::module(module, self);
+                    debug!("crate_root def id: {:?}", crate_root.def_id());
+
+                    self.build_reduced_graph_for_namespaced_crate(crate_root, ident, parent_scope);
+                }
+            }
+        }
+
         for child in self.tcx.module_children(module.def_id()) {
+            debug!("child module: {:?}", child);
             let parent_scope = ParentScope::module(module, self);
             self.build_reduced_graph_for_external_crate_res(child, parent_scope)
         }
     }
 
     /// Builds the reduced graph for a single item in an external crate.
+    #[instrument(level = "debug", skip(self))]
     fn build_reduced_graph_for_external_crate_res(
         &mut self,
         child: &ModChild,
@@ -271,6 +309,30 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             | Res::SelfTyAlias { .. }
             | Res::SelfCtor(..)
             | Res::Err => bug!("unexpected resolution: {:?}", res),
+        }
+    }
+
+    #[instrument(level = "debug", skip(self))]
+    fn build_reduced_graph_for_namespaced_crate(
+        &mut self,
+        module: Module<'ra>,
+        ident: Ident,
+        parent_scope: ParentScope<'ra>,
+    ) {
+        let parent = parent_scope.module;
+        let res = module.res().expect("namespaced crate has no Res").expect_non_local();
+        let expansion = parent_scope.expansion;
+
+        match res {
+            Res::Def(DefKind::Mod, _) => {
+                self.define(
+                    parent,
+                    ident,
+                    TypeNS,
+                    (module, ty::Visibility::<DefId>::Public, DUMMY_SP, expansion),
+                );
+            }
+            _ => bug!("expected namespaced crate to have Res Def(DefKind::Mod)"),
         }
     }
 }
@@ -423,6 +485,7 @@ impl<'a, 'ra, 'tcx> BuildReducedGraphVisitor<'a, 'ra, 'tcx> {
     }
 
     // Add an import to the current module.
+    #[instrument(level = "debug", skip(self, kind))]
     fn add_import(
         &mut self,
         module_path: Vec<Segment>,
@@ -457,6 +520,7 @@ impl<'a, 'ra, 'tcx> BuildReducedGraphVisitor<'a, 'ra, 'tcx> {
                     if !type_ns_only || ns == TypeNS {
                         let key = BindingKey::new(target, ns);
                         let mut resolution = this.resolution(current_module, key).borrow_mut();
+                        debug!("adding import {:?} for module {:?}", import, resolution);
                         resolution.single_imports.insert(import);
                     }
                 });
@@ -469,6 +533,7 @@ impl<'a, 'ra, 'tcx> BuildReducedGraphVisitor<'a, 'ra, 'tcx> {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn build_reduced_graph_for_use_tree(
         &mut self,
         // This particular use tree
@@ -482,11 +547,6 @@ impl<'a, 'ra, 'tcx> BuildReducedGraphVisitor<'a, 'ra, 'tcx> {
         vis: ty::Visibility,
         root_span: Span,
     ) {
-        debug!(
-            "build_reduced_graph_for_use_tree(parent_prefix={:?}, use_tree={:?}, nested={})",
-            parent_prefix, use_tree, nested
-        );
-
         // Top level use tree reuses the item's id and list stems reuse their parent
         // use tree's ids, so in both cases their visibilities are already filled.
         if nested && !list_stem {
@@ -589,7 +649,7 @@ impl<'a, 'ra, 'tcx> BuildReducedGraphVisitor<'a, 'ra, 'tcx> {
                         let crate_root = self.r.resolve_crate_root(source.ident);
                         let crate_name = match crate_root.kind {
                             ModuleKind::Def(.., name) => name,
-                            ModuleKind::Block => unreachable!(),
+                            ModuleKind::Block | ModuleKind::NamespaceCrate(..) => unreachable!(),
                         };
                         // HACK(eddyb) unclear how good this is, but keeping `$crate`
                         // in `source` breaks `tests/ui/imports/import-crate-var.rs`,
@@ -897,6 +957,7 @@ impl<'a, 'ra, 'tcx> BuildReducedGraphVisitor<'a, 'ra, 'tcx> {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn build_reduced_graph_for_extern_crate(
         &mut self,
         orig_name: Option<Symbol>,
