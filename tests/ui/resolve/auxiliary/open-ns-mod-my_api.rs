@@ -1,3 +1,5 @@
+#![crate_name = "my_api"]
+
 pub mod utils {
     pub fn utils_helper() {
         println!("helper function");
