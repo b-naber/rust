@@ -806,8 +806,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         )
     }
 
-    /// Attempts to resolve `ident` in namespaces `ns` of `module`.
-    /// Invariant: if `finalize` is `Some`, expansion and import resolution must be complete.
     #[instrument(level = "debug", skip(self))]
     fn resolve_ident_in_module_unadjusted(
         &mut self,
@@ -878,16 +876,16 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             }
         };
 
-        let key = BindingKey::new(ident, ns);
-        debug!("trying to resolve {:?} in module {:?}", ident, module);
-        let res = self.resolution(module, key).try_borrow();
-        debug!("res: {:?}", res);
-        drop(res);
-
-        let resolution_result = self.resolution(module, key).try_borrow_mut().map_err(|_| {
-            debug!("got resolution error for module {:?}", module);
-            (Determined, Weak::No)
-        }); // This happens when there is a cycle of imports.
+        let result = self.try_resolve_ident_in_module_unadjusted(
+            module,
+            ident,
+            ns,
+            parent_scope,
+            shadowing,
+            finalize,
+            ignore_binding,
+            ignore_import,
+        );
 
         // If resolution failed for the module, check if we can resolve ident to a namespaced crate.
         // Suppose we have the crate `my_api` and the namespaced crate `my_api::utils` as dependencies
@@ -896,11 +894,13 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         // prelude we resolve `my_api::utils` to that crate then. If `my_api` does have a module
         // named `utils` and a namespaced crate `my_api::utils` exists, then we report a name conflict error
         // (via `build_reduced_graph_external`).
-        let resolution = if let Err(err) = resolution_result {
+        if let Err(err) = result {
+            debug!("module.kind.name: {:?}", module.kind.name());
             if let Some(module_name) = module.kind.name() {
                 let Some(namespaced_crate_names) =
                     self.namespaced_crate_names.get(module_name.as_str())
                 else {
+                    debug!("not a namespaced crate name");
                     return Err(err);
                 };
 
@@ -924,10 +924,32 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             } else {
                 return Err(err);
             }
-        } else {
-            resolution_result.unwrap()
-        };
-        debug!(?resolution);
+        }
+
+        result
+    }
+
+    /// Attempts to resolve `ident` in namespaces `ns` of `module`.
+    /// Invariant: if `finalize` is `Some`, expansion and import resolution must be complete.
+    #[instrument(level = "debug", skip(self))]
+    fn try_resolve_ident_in_module_unadjusted(
+        &mut self,
+        module: Module<'ra>,
+        ident: Ident,
+        ns: Namespace,
+        parent_scope: &ParentScope<'ra>,
+        shadowing: Shadowing,
+        finalize: Option<Finalize>,
+        // This binding should be ignored during in-module resolution, so that we don't get
+        // "self-confirming" import resolutions during import validation and checking.
+        ignore_binding: Option<NameBinding<'ra>>,
+        ignore_import: Option<Import<'ra>>,
+    ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
+        let key = BindingKey::new(ident, ns);
+        let resolution = self.resolution(module, key).try_borrow_mut().map_err(|_| {
+            debug!("got resolution error for module {:?}", module);
+            (Determined, Weak::No)
+        })?; // This happens when there is a cycle of imports.
 
         // If the primary binding is unusable, search further and return the shadowed glob
         // binding if it exists. What we really want here is having two separate scopes in
