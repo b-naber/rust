@@ -461,7 +461,6 @@ pub trait PrettyPrinter<'tcx>: Printer<'tcx> + fmt::Write {
             return Ok(true);
         }
         if self.tcx().sess.opts.unstable_opts.trim_diagnostic_paths
-            && self.tcx().sess.opts.trimmed_def_paths
             && !with_no_trimmed_paths()
             && !with_crate_prefix()
             && let Some(symbol) = self.tcx().trimmed_def_paths(()).get(&def_id)

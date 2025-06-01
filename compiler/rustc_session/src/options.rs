@@ -372,9 +372,6 @@ top_level_options!(
         /// Whether name resolver should resolve documentation links.
         resolve_doc_links: ResolveDocLinks [TRACKED],
 
-        /// Control path trimming.
-        trimmed_def_paths: bool [TRACKED],
-
         /// Specifications of codegen units / ThinLTO which are forced as a
         /// result of parsing command line options. These are not necessarily
         /// what rustc was invoked with, but massaged a bit to agree with

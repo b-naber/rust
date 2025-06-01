@@ -202,7 +202,6 @@ impl Callbacks for TimePassesCallbacks {
         //
         self.time_passes = (config.opts.prints.is_empty() && config.opts.unstable_opts.time_passes)
             .then(|| config.opts.unstable_opts.time_passes_format);
-        config.opts.trimmed_def_paths = true;
     }
 }
 
