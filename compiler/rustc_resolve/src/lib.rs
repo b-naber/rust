@@ -122,7 +122,8 @@ enum Scope<'ra> {
     CrateRoot,
     // The node ID is for reporting the `PROC_MACRO_DERIVE_RESOLUTION_FALLBACK`
     // lint if it should be reported.
-    Module(Module<'ra>, Option<NodeId>),
+    NonGlob(Module<'ra>, Option<NodeId>),
+    Glob(Module<'ra>),
     MacroUsePrelude,
     BuiltinAttrs,
     ExternPrelude,

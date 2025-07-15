@@ -1,4 +1,4 @@
-use Determinacy::*;
+'''use Determinacy::*;
 use Namespace::*;
 use rustc_ast::{self as ast, NodeId};
 use rustc_errors::ErrorGuaranteed;
@@ -110,7 +110,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         };
         let mut scope = match ns {
             _ if is_absolute_path => Scope::CrateRoot,
-            TypeNS | ValueNS => Scope::Module(module, None),
+            TypeNS | ValueNS => Scope::NonGlob(module, None),
             MacroNS => Scope::DeriveHelpers(parent_scope.expansion),
         };
         let mut ctxt = ctxt.normalize_to_macros_2_0();
@@ -138,7 +138,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     true
                 }
                 Scope::CrateRoot => true,
-                Scope::Module(..) => true,
+                Scope::NonGlob(..) | Scope::Glob(..) => true,
                 Scope::MacroUsePrelude => use_prelude || rust_2015,
                 Scope::BuiltinAttrs => true,
                 Scope::ExternPrelude => use_prelude || is_absolute_path,
@@ -175,7 +175,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     MacroRulesScope::Invocation(invoc_id) => {
                         Scope::MacroRules(self.invocation_parent_scopes[&invoc_id].macro_rules)
                     }
-                    MacroRulesScope::Empty => Scope::Module(module, None),
+                    MacroRulesScope::Empty => Scope::NonGlob(module, None),
                 },
                 Scope::CrateRoot => match ns {
                     TypeNS => {
@@ -184,16 +184,15 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                     ValueNS | MacroNS => break,
                 },
-                Scope::Module(module, prev_lint_id) => {
+                Scope::NonGlob(module, _) => Scope::Glob(module),
+                Scope::Glob(module) => {
                     use_prelude = !module.no_implicit_prelude;
                     let derive_fallback_lint_id = match scope_set {
                         ScopeSet::Late(.., lint_id) => lint_id,
                         _ => None,
                     };
                     match self.hygienic_lexical_parent(module, &mut ctxt, derive_fallback_lint_id) {
-                        Some((parent_module, lint_id)) => {
-                            Scope::Module(parent_module, lint_id.or(prev_lint_id))
-                        }
+                        Some((parent_module, lint_id)) => Scope::NonGlob(parent_module, lint_id),
                         None => {
                             ctxt.adjust(ExpnId::root());
                             match ns {
@@ -312,7 +311,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         // Walk backwards up the ribs in scope.
         let mut module = self.graph_root;
         for (i, rib) in ribs.iter().enumerate().rev() {
-            debug!("walk rib\n{:?}", rib.bindings);
+            debug!("walk rib
+{:?}", rib.bindings);
             // Use the rib kind to determine whether we are resolving parameters
             // (macro 2.0 hygiene) or local variables (`macro_rules` hygiene).
             let rib_ident = if rib.kind.contains_params() { normalized_ident } else { ident };
@@ -344,7 +344,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 _ => break,
             }
 
-            let item = self.resolve_ident_in_module_unadjusted(
+            let item = self.resolve_ident_in_module_unadjusted_non_glob(
                 ModuleOrUniformRoot::Module(module),
                 ident,
                 ns,
@@ -515,9 +515,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             Err((Determinacy::Determined, _)) => Err(Determinacy::Determined),
                         }
                     }
-                    Scope::Module(module, derive_fallback_lint_id) => {
+                    Scope::NonGlob(module, derive_fallback_lint_id) => {
                         let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
-                        let binding = this.resolve_ident_in_module_unadjusted(
+                        let binding = this.resolve_ident_in_module_unadjusted_non_glob(
                             ModuleOrUniformRoot::Module(module),
                             ident,
                             ns,
@@ -563,6 +563,42 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             Err((Determinacy::Determined, _)) => Err(Determinacy::Determined),
                         }
                     }
+                    Scope::Glob(module) => {
+                        let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
+                        let binding = this.resolve_ident_in_module_unadjusted_glob(
+                            ModuleOrUniformRoot::Module(module),
+                            ident,
+                            ns,
+                            adjusted_parent_scope,
+                            if matches!(scope_set, ScopeSet::Late(..)) {
+                                Shadowing::Unrestricted
+                            } else {
+                                Shadowing::Restricted
+                            },
+                            finalize.map(|finalize| Finalize { used: Used::Scope, ..finalize }),
+                            ignore_binding,
+                            ignore_import,
+                        );
+                        match binding {
+                            Ok(binding) => {
+                                let misc_flags = if module == this.graph_root {
+                                    Flags::MISC_SUGGEST_CRATE
+                                } else if module.is_normal() {
+                                    Flags::MISC_SUGGEST_SELF
+                                } else {
+                                    Flags::empty()
+                                };
+                                Ok((binding, Flags::MODULE | misc_flags))
+                            }
+                            Err((Determinacy::Undetermined, Weak::No)) => {
+                                return Some(Err(Determinacy::determined(force)));
+                            }
+                            Err((Determinacy::Undetermined, Weak::Yes)) => {
+                                Err(Determinacy::Undetermined)
+                            }
+                            Err((Determinacy::Determined, _)) => Err(Determinacy::Determined),
+                        }
+                    }
                     Scope::MacroUsePrelude => {
                         match this.macro_use_prelude.get(&ident.name).cloned() {
                             Some(binding) => Ok((binding, Flags::MISC_FROM_PRELUDE)),
@@ -590,7 +626,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     Scope::StdLibPrelude => {
                         let mut result = Err(Determinacy::Determined);
                         if let Some(prelude) = this.prelude
-                            && let Ok(binding) = this.resolve_ident_in_module_unadjusted(
+                            && let Ok(binding) = this.resolve_ident_in_module_unadjusted_non_glob(
                                 ModuleOrUniformRoot::Module(prelude),
                                 ident,
                                 ns,
@@ -785,7 +821,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 // No adjustments
             }
         }
-        self.resolve_ident_in_module_unadjusted(
+        self.resolve_ident_in_module_unadjusted_non_glob(
             module,
             ident,
             ns,
@@ -800,7 +836,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     /// Attempts to resolve `ident` in namespaces `ns` of `module`.
     /// Invariant: if `finalize` is `Some`, expansion and import resolution must be complete.
     #[instrument(level = "debug", skip(self))]
-    fn resolve_ident_in_module_unadjusted(
+    fn resolve_ident_in_module_unadjusted_non_glob(
         &mut self,
         module: ModuleOrUniformRoot<'ra>,
         ident: Ident,
@@ -871,19 +907,18 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let resolution =
             self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
 
-        // If the primary binding is unusable, search further and return the shadowed glob
-        // binding if it exists. What we really want here is having two separate scopes in
-        // a module - one for non-globs and one for globs, but until that's done use this
-        // hack to avoid inconsistent resolution ICEs during import validation.
-        let binding = [resolution.non_glob_binding, resolution.glob_binding]
-            .into_iter()
-            .find_map(|binding| if binding == ignore_binding { None } else { binding });
+        let binding = resolution.non_glob_binding;
+        if let Some(binding) = binding {
+            if binding == ignore_binding {
+                return Err((Determined, Weak::No));
+            }
+        }
 
         if let Some(finalize) = finalize {
             return self.finalize_module_binding(
                 ident,
                 binding,
-                if resolution.non_glob_binding.is_some() { resolution.glob_binding } else { None },
+                resolution.glob_binding,
                 parent_scope,
                 finalize,
                 shadowing,
@@ -896,9 +931,82 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         };
 
         // Items and single imports are not shadowable, if we have one, then it's determined.
-        if let Some(binding) = binding
-            && !binding.is_glob_import()
-        {
+        if let Some(binding) = binding {
+            return check_usable(self, binding);
+        }
+
+        // --- From now on we have no resolution. ---
+
+        // Check if one of single imports can still define the name,
+        // if it can then our result is not determined and can be invalidated.
+        if self.single_import_can_define_name(
+            &resolution,
+            binding,
+            ns,
+            ignore_import,
+            ignore_binding,
+            parent_scope,
+        ) {
+            return Err((Undetermined, Weak::No));
+        }
+
+        // Check if one of unexpanded macros can still define the name,
+        // if it can then our "no resolution" result is not determined and can be invalidated.
+        if !module.unexpanded_invocations.borrow().is_empty() {
+            return Err((Undetermined, Weak::Yes));
+        }
+
+        // No resolution and no one else can define the name - determinate error.
+        Err((Determined, Weak::No))
+    }
+
+    fn resolve_ident_in_module_unadjusted_glob(
+        &mut self,
+        module: ModuleOrUniformRoot<'ra>,
+        ident: Ident,
+        ns: Namespace,
+        parent_scope: &ParentScope<'ra>,
+        shadowing: Shadowing,
+        finalize: Option<Finalize>,
+        // This binding should be ignored during in-module resolution, so that we don't get
+        // "self-confirming" import resolutions during import validation and checking.
+        ignore_binding: Option<NameBinding<'ra>>,
+        ignore_import: Option<Import<'ra>>,
+    ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
+        let module = match module {
+            ModuleOrUniformRoot::Module(module) => module,
+            _ => return Err((Determined, Weak::No)),
+        };
+
+        let key = BindingKey::new(ident, ns);
+        let resolution =
+            self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
+
+        let binding = resolution.glob_binding;
+        if let Some(binding) = binding {
+            if binding == ignore_binding {
+                return Err((Determined, Weak::No));
+            }
+        }
+
+        if let Some(finalize) = finalize {
+            return self.finalize_module_binding(
+                ident,
+                binding,
+                None,
+                parent_scope,
+                finalize,
+                shadowing,
+            );
+        }
+
+        let check_usable = |this: &mut Self, binding: NameBinding<'ra>| {
+            let usable = this.is_accessible_from(binding.vis, parent_scope.module);
+            if usable { Ok(binding) } else { Err((Determined, Weak::No)) }
+        };
+
+        // Items and single imports are not shadowable, if we have one, then it's determined.
+        if let Some(binding) = binding {
             return check_usable(self, binding);
         }
 
@@ -977,7 +1085,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 Some(None) => {}
                 None => continue,
             };
-            let result = self.resolve_ident_in_module_unadjusted(
+            let result = self.resolve_ident_in_module_unadjusted_non_glob(
                 ModuleOrUniformRoot::Module(module),
                 ident,
                 ns,
@@ -1724,3 +1832,4 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         })
     }
 }
+''
