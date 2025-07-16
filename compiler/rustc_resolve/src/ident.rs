@@ -1246,6 +1246,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn create_resolution_in_module_error(
         &mut self,
         module: Module<'ra>,
@@ -1255,6 +1256,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ignore_binding: Option<NameBinding<'ra>>,
         ignore_import: Option<Import<'ra>>,
     ) -> (Determinacy, Weak) {
+        debug!("error in resolution");
+
         // Now we are in situation when new item/import can appear only from a glob or a macro
         // expansion. With restricted shadowing names from globs and macro expansions cannot
         // shadow names from outer scopes, so we can freely fallback from module search to search
@@ -1264,12 +1267,14 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         // Check if one of unexpanded macros can still define the name,
         // if it can then our "no resolution" result is not determined and can be invalidated.
         if !module.unexpanded_invocations.borrow().is_empty() {
+            debug!("no unexpanded invocations -> Undetermined");
             return (Undetermined, Weak::Yes);
         }
 
         // Check if one of glob imports can still define the name,
         // if it can then our "no resolution" result is not determined and can be invalidated.
         for glob_import in module.globs.borrow().iter() {
+            debug!(?glob_import);
             if ignore_import == Some(*glob_import) {
                 continue;
             }
@@ -1281,6 +1286,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 Some(_) => continue,
                 None => return (Undetermined, Weak::Yes),
             };
+            debug!(?module);
             let tmp_parent_scope;
             let (mut adjusted_parent_scope, mut ident) =
                 (parent_scope, ident.normalize_to_macros_2_0());
@@ -1305,6 +1311,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 ignore_binding,
                 ignore_import,
             );
+            debug!(?result);
 
             match result {
                 Err((Determined, _)) => continue,
@@ -1317,6 +1324,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             }
         }
 
+        debug!("no resolution and no one else can define the name");
         // No resolution and no one else can define the name - determinate error.
         (Determined, Weak::No)
     }
