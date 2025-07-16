@@ -122,7 +122,10 @@ enum Scope<'ra> {
     CrateRoot,
     // The node ID is for reporting the `PROC_MACRO_DERIVE_RESOLUTION_FALLBACK`
     // lint if it should be reported.
-    Module(Module<'ra>, Option<NodeId>),
+    NonGlobModule(Module<'ra>, Option<NodeId>),
+    // The node ID is for reporting the `PROC_MACRO_DERIVE_RESOLUTION_FALLBACK`
+    // lint if it should be reported.
+    GlobModule(Module<'ra>, Option<NodeId>),
     MacroUsePrelude,
     BuiltinAttrs,
     ExternPrelude,
@@ -1812,7 +1815,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
         self.visit_scopes(ScopeSet::All(TypeNS), parent_scope, ctxt, |this, scope, _, _| {
             match scope {
-                Scope::Module(module, _) => {
+                Scope::NonGlobModule(module, _) => {
+                    this.traits_in_module(module, assoc_item, &mut found_traits);
+                }
+                Scope::GlobModule(module, _) => {
                     this.traits_in_module(module, assoc_item, &mut found_traits);
                 }
                 Scope::StdLibPrelude => {

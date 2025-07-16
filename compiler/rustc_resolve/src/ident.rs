@@ -110,7 +110,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         };
         let mut scope = match ns {
             _ if is_absolute_path => Scope::CrateRoot,
-            TypeNS | ValueNS => Scope::Module(module, None),
+            TypeNS | ValueNS => Scope::NonGlobModule(module, None),
             MacroNS => Scope::DeriveHelpers(parent_scope.expansion),
         };
         let mut ctxt = ctxt.normalize_to_macros_2_0();
@@ -138,7 +138,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     true
                 }
                 Scope::CrateRoot => true,
-                Scope::Module(..) => true,
+                Scope::NonGlobModule(..) | Scope::GlobModule(..) => true,
                 Scope::MacroUsePrelude => use_prelude || rust_2015,
                 Scope::BuiltinAttrs => true,
                 Scope::ExternPrelude => use_prelude || is_absolute_path,
@@ -175,7 +175,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     MacroRulesScope::Invocation(invoc_id) => {
                         Scope::MacroRules(self.invocation_parent_scopes[&invoc_id].macro_rules)
                     }
-                    MacroRulesScope::Empty => Scope::Module(module, None),
+                    MacroRulesScope::Empty => Scope::NonGlobModule(module, None),
                 },
                 Scope::CrateRoot => match ns {
                     TypeNS => {
@@ -184,7 +184,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                     ValueNS | MacroNS => break,
                 },
-                Scope::Module(module, prev_lint_id) => {
+                Scope::NonGlobModule(module, prev_lint_id) => {
+                    use_prelude = !module.no_implicit_prelude;
+                    Scope::GlobModule(module, prev_lint_id)
+                }
+                Scope::GlobModule(module, prev_lint_id) => {
                     use_prelude = !module.no_implicit_prelude;
                     let derive_fallback_lint_id = match scope_set {
                         ScopeSet::Late(.., lint_id) => lint_id,
@@ -192,7 +196,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     };
                     match self.hygienic_lexical_parent(module, &mut ctxt, derive_fallback_lint_id) {
                         Some((parent_module, lint_id)) => {
-                            Scope::Module(parent_module, lint_id.or(prev_lint_id))
+                            Scope::NonGlobModule(parent_module, lint_id.or(prev_lint_id))
                         }
                         None => {
                             ctxt.adjust(ExpnId::root());
@@ -515,9 +519,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             Err((Determinacy::Determined, _)) => Err(Determinacy::Determined),
                         }
                     }
-                    Scope::Module(module, derive_fallback_lint_id) => {
+                    Scope::NonGlobModule(module, derive_fallback_lint_id) => {
                         let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
-                        let binding = this.resolve_ident_in_module_unadjusted(
+                        let binding = this.resolve_ident_in_non_glob_module_unadjusted(
                             ModuleOrUniformRoot::Module(module),
                             ident,
                             ns,
@@ -531,6 +535,56 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
+
+                        match binding {
+                            Ok(binding) => {
+                                if let Some(lint_id) = derive_fallback_lint_id {
+                                    this.lint_buffer.buffer_lint(
+                                        PROC_MACRO_DERIVE_RESOLUTION_FALLBACK,
+                                        lint_id,
+                                        orig_ident.span,
+                                        BuiltinLintDiag::ProcMacroDeriveResolutionFallback {
+                                            span: orig_ident.span,
+                                            ns,
+                                            ident,
+                                        },
+                                    );
+                                }
+                                let misc_flags = if module == this.graph_root {
+                                    Flags::MISC_SUGGEST_CRATE
+                                } else if module.is_normal() {
+                                    Flags::MISC_SUGGEST_SELF
+                                } else {
+                                    Flags::empty()
+                                };
+                                Ok((binding, Flags::MODULE | misc_flags))
+                            }
+                            Err((Determinacy::Undetermined, Weak::No)) => {
+                                return Some(Err(Determinacy::determined(force)));
+                            }
+                            Err((Determinacy::Undetermined, Weak::Yes)) => {
+                                Err(Determinacy::Undetermined)
+                            }
+                            Err((Determinacy::Determined, _)) => Err(Determinacy::Determined),
+                        }
+                    }
+                    Scope::GlobModule(module, derive_fallback_lint_id) => {
+                        let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
+                        let binding = this.resolve_ident_in_glob_module_unadjusted(
+                            ModuleOrUniformRoot::Module(module),
+                            ident,
+                            ns,
+                            adjusted_parent_scope,
+                            if matches!(scope_set, ScopeSet::Late(..)) {
+                                Shadowing::Unrestricted
+                            } else {
+                                Shadowing::Restricted
+                            },
+                            finalize.map(|finalize| Finalize { used: Used::Scope, ..finalize }),
+                            ignore_binding,
+                            ignore_import,
+                        );
+
                         match binding {
                             Ok(binding) => {
                                 if let Some(lint_id) = derive_fallback_lint_id {
@@ -826,6 +880,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     ignore_binding,
                     ignore_import,
                 );
+
                 return binding.map_err(|determinacy| (determinacy, Weak::No));
             }
             ModuleOrUniformRoot::ExternPrelude => {
@@ -863,6 +918,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     ignore_binding,
                     ignore_import,
                 );
+
                 return binding.map_err(|determinacy| (determinacy, Weak::No));
             }
         };
@@ -871,74 +927,321 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let resolution =
             self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
 
-        // If the primary binding is unusable, search further and return the shadowed glob
-        // binding if it exists. What we really want here is having two separate scopes in
-        // a module - one for non-globs and one for globs, but until that's done use this
-        // hack to avoid inconsistent resolution ICEs during import validation.
-        let binding = [resolution.non_glob_binding, resolution.glob_binding]
-            .into_iter()
-            .find_map(|binding| if binding == ignore_binding { None } else { binding });
-
-        if let Some(finalize) = finalize {
-            return self.finalize_module_binding(
-                ident,
-                binding,
-                if resolution.non_glob_binding.is_some() { resolution.glob_binding } else { None },
-                parent_scope,
-                finalize,
-                shadowing,
-            );
-        }
-
         let check_usable = |this: &mut Self, binding: NameBinding<'ra>| {
             let usable = this.is_accessible_from(binding.vis, parent_scope.module);
             if usable { Ok(binding) } else { Err((Determined, Weak::No)) }
         };
 
-        // Items and single imports are not shadowable, if we have one, then it's determined.
-        if let Some(binding) = binding
-            && !binding.is_glob_import()
+        if let Some(binding) = resolution.non_glob_binding
+            && ignore_binding.map_or(true, |b| binding != b)
         {
-            return check_usable(self, binding);
-        }
-
-        // --- From now on we either have a glob resolution or no resolution. ---
-
-        // Check if one of single imports can still define the name,
-        // if it can then our result is not determined and can be invalidated.
-        if self.single_import_can_define_name(
-            &resolution,
-            binding,
-            ns,
-            ignore_import,
-            ignore_binding,
-            parent_scope,
-        ) {
-            return Err((Undetermined, Weak::No));
-        }
-
-        // So we have a resolution that's from a glob import. This resolution is determined
-        // if it cannot be shadowed by some new item/import expanded from a macro.
-        // This happens either if there are no unexpanded macros, or expanded names cannot
-        // shadow globs (that happens in macro namespace or with restricted shadowing).
-        //
-        // Additionally, any macro in any module can plant names in the root module if it creates
-        // `macro_export` macros, so the root module effectively has unresolved invocations if any
-        // module has unresolved invocations.
-        // However, it causes resolution/expansion to stuck too often (#53144), so, to make
-        // progress, we have to ignore those potential unresolved invocations from other modules
-        // and prohibit access to macro-expanded `macro_export` macros instead (unless restricted
-        // shadowing is enabled, see `macro_expanded_macro_export_errors`).
-        if let Some(binding) = binding {
-            if binding.determined() || ns == MacroNS || shadowing == Shadowing::Restricted {
+            if let Some(finalize) = finalize {
+                return self.finalize_non_glob_module_binding(
+                    ident,
+                    binding,
+                    resolution.glob_binding,
+                    parent_scope,
+                    finalize,
+                    shadowing,
+                );
+            } else {
                 return check_usable(self, binding);
+            }
+        } else if let Some(glob_binding) = resolution.glob_binding {
+            if let Some(finalize) = finalize {
+                return self.finalize_glob_module_binding(
+                    ident,
+                    glob_binding,
+                    parent_scope,
+                    finalize,
+                    shadowing,
+                );
+            }
+
+            // Check if one of single imports can still define the name,
+            // if it can then our result is not determined and can be invalidated.
+            if self.single_import_can_define_name(
+                &resolution,
+                Some(glob_binding),
+                ns,
+                ignore_import,
+                ignore_binding,
+                parent_scope,
+            ) {
+                return Err((Undetermined, Weak::No));
+            }
+
+            // So we have a resolution that's from a glob import. This resolution is determined
+            // if it cannot be shadowed by some new item/import expanded from a macro.
+            // This happens either if there are no unexpanded macros, or expanded names cannot
+            // shadow globs (that happens in macro namespace or with restricted shadowing).
+            //
+            // Additionally, any macro in any module can plant names in the root module if it creates
+            // `macro_export` macros, so the root module effectively has unresolved invocations if any
+            // module has unresolved invocations.
+            // However, it causes resolution/expansion to stuck too often (#53144), so, to make
+            // progress, we have to ignore those potential unresolved invocations from other modules
+            // and prohibit access to macro-expanded `macro_export` macros instead (unless restricted
+            // shadowing is enabled, see `macro_expanded_macro_export_errors`).
+            if glob_binding.determined() || ns == MacroNS || shadowing == Shadowing::Restricted {
+                return check_usable(self, glob_binding);
             } else {
                 return Err((Undetermined, Weak::No));
             }
         }
 
-        // --- From now on we have no resolution. ---
+        return Err(self.create_resolution_in_module_error(
+            module,
+            ident,
+            ns,
+            parent_scope,
+            ignore_binding,
+            ignore_import,
+        ));
+    }
 
+    fn resolve_ident_in_non_glob_module_unadjusted(
+        &mut self,
+        module: ModuleOrUniformRoot<'ra>,
+        ident: Ident,
+        ns: Namespace,
+        parent_scope: &ParentScope<'ra>,
+        shadowing: Shadowing,
+        finalize: Option<Finalize>,
+        // This binding should be ignored during in-module resolution, so that we don't get
+        // "self-confirming" import resolutions during import validation and checking.
+        ignore_binding: Option<NameBinding<'ra>>,
+        ignore_import: Option<Import<'ra>>,
+    ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
+        let module = match module {
+            ModuleOrUniformRoot::Module(module) => module,
+            ModuleOrUniformRoot::CrateRootAndExternPrelude => {
+                assert_eq!(shadowing, Shadowing::Unrestricted);
+                let binding = self.early_resolve_ident_in_lexical_scope(
+                    ident,
+                    ScopeSet::AbsolutePath(ns),
+                    parent_scope,
+                    finalize,
+                    finalize.is_some(),
+                    ignore_binding,
+                    ignore_import,
+                );
+
+                return binding.map_err(|determinacy| (determinacy, Weak::No));
+            }
+            ModuleOrUniformRoot::ExternPrelude => {
+                assert_eq!(shadowing, Shadowing::Unrestricted);
+                return if ns != TypeNS {
+                    Err((Determined, Weak::No))
+                } else if let Some(binding) = self.extern_prelude_get(ident, finalize.is_some()) {
+                    Ok(binding)
+                } else if !self.graph_root.unexpanded_invocations.borrow().is_empty() {
+                    // Macro-expanded `extern crate` items can add names to extern prelude.
+                    Err((Undetermined, Weak::No))
+                } else {
+                    Err((Determined, Weak::No))
+                };
+            }
+            ModuleOrUniformRoot::CurrentScope => {
+                assert_eq!(shadowing, Shadowing::Unrestricted);
+                if ns == TypeNS {
+                    if ident.name == kw::Crate || ident.name == kw::DollarCrate {
+                        let module = self.resolve_crate_root(ident);
+                        return Ok(self.module_self_bindings[&module]);
+                    } else if ident.name == kw::Super || ident.name == kw::SelfLower {
+                        // FIXME: Implement these with renaming requirements so that e.g.
+                        // `use super;` doesn't work, but `use super as name;` does.
+                        // Fall through here to get an error from `early_resolve_...`.
+                    }
+                }
+
+                let binding = self.early_resolve_ident_in_lexical_scope(
+                    ident,
+                    ScopeSet::All(ns),
+                    parent_scope,
+                    finalize,
+                    finalize.is_some(),
+                    ignore_binding,
+                    ignore_import,
+                );
+
+                return binding.map_err(|determinacy| (determinacy, Weak::No));
+            }
+        };
+
+        let key = BindingKey::new(ident, ns);
+        let resolution =
+            self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
+
+        // TODO extract this to method
+        let check_usable = |this: &mut Self, binding: NameBinding<'ra>| {
+            let usable = this.is_accessible_from(binding.vis, parent_scope.module);
+            if usable { Ok(binding) } else { Err((Determined, Weak::No)) }
+        };
+
+        if let Some(binding) = resolution.non_glob_binding
+            && ignore_binding.map_or(true, |b| binding != b)
+        {
+            if let Some(finalize) = finalize {
+                return self.finalize_non_glob_module_binding(
+                    ident,
+                    binding,
+                    resolution.glob_binding,
+                    parent_scope,
+                    finalize,
+                    shadowing,
+                );
+            } else {
+                return check_usable(self, binding);
+            }
+        } else {
+            return Err((Determinacy::Undetermined, Weak::Yes));
+        }
+    }
+
+    fn resolve_ident_in_glob_module_unadjusted(
+        &mut self,
+        module: ModuleOrUniformRoot<'ra>,
+        ident: Ident,
+        ns: Namespace,
+        parent_scope: &ParentScope<'ra>,
+        shadowing: Shadowing,
+        finalize: Option<Finalize>,
+        // This binding should be ignored during in-module resolution, so that we don't get
+        // "self-confirming" import resolutions during import validation and checking.
+        ignore_binding: Option<NameBinding<'ra>>,
+        ignore_import: Option<Import<'ra>>,
+    ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
+        let module = match module {
+            ModuleOrUniformRoot::Module(module) => module,
+            ModuleOrUniformRoot::CrateRootAndExternPrelude => {
+                assert_eq!(shadowing, Shadowing::Unrestricted);
+                let binding = self.early_resolve_ident_in_lexical_scope(
+                    ident,
+                    ScopeSet::AbsolutePath(ns),
+                    parent_scope,
+                    finalize,
+                    finalize.is_some(),
+                    ignore_binding,
+                    ignore_import,
+                );
+
+                return binding.map_err(|determinacy| (determinacy, Weak::No));
+            }
+            ModuleOrUniformRoot::ExternPrelude => {
+                assert_eq!(shadowing, Shadowing::Unrestricted);
+                return if ns != TypeNS {
+                    Err((Determined, Weak::No))
+                } else if let Some(binding) = self.extern_prelude_get(ident, finalize.is_some()) {
+                    Ok(binding)
+                } else if !self.graph_root.unexpanded_invocations.borrow().is_empty() {
+                    // Macro-expanded `extern crate` items can add names to extern prelude.
+                    Err((Undetermined, Weak::No))
+                } else {
+                    Err((Determined, Weak::No))
+                };
+            }
+            ModuleOrUniformRoot::CurrentScope => {
+                assert_eq!(shadowing, Shadowing::Unrestricted);
+                if ns == TypeNS {
+                    if ident.name == kw::Crate || ident.name == kw::DollarCrate {
+                        let module = self.resolve_crate_root(ident);
+                        return Ok(self.module_self_bindings[&module]);
+                    } else if ident.name == kw::Super || ident.name == kw::SelfLower {
+                        // FIXME: Implement these with renaming requirements so that e.g.
+                        // `use super;` doesn't work, but `use super as name;` does.
+                        // Fall through here to get an error from `early_resolve_...`.
+                    }
+                }
+
+                let binding = self.early_resolve_ident_in_lexical_scope(
+                    ident,
+                    ScopeSet::All(ns),
+                    parent_scope,
+                    finalize,
+                    finalize.is_some(),
+                    ignore_binding,
+                    ignore_import,
+                );
+
+                return binding.map_err(|determinacy| (determinacy, Weak::No));
+            }
+        };
+
+        let key = BindingKey::new(ident, ns);
+        let resolution =
+            self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
+
+        // TODO extract this to method
+        let check_usable = |this: &mut Self, binding: NameBinding<'ra>| {
+            let usable = this.is_accessible_from(binding.vis, parent_scope.module);
+            if usable { Ok(binding) } else { Err((Determined, Weak::No)) }
+        };
+
+        if let Some(binding) = resolution.glob_binding
+            && ignore_binding.map_or(true, |b| binding != b)
+        {
+            if let Some(finalize) = finalize {
+                return self.finalize_glob_module_binding(
+                    ident,
+                    binding,
+                    parent_scope,
+                    finalize,
+                    shadowing,
+                );
+            } else {
+                // Check if one of single imports can still define the name,
+                // if it can then our result is not determined and can be invalidated.
+                if self.single_import_can_define_name(
+                    &resolution,
+                    Some(binding),
+                    ns,
+                    ignore_import,
+                    ignore_binding,
+                    parent_scope,
+                ) {
+                    return Err((Undetermined, Weak::No));
+                }
+
+                // So we have a resolution that's from a glob import. This resolution is determined
+                // if it cannot be shadowed by some new item/import expanded from a macro.
+                // This happens either if there are no unexpanded macros, or expanded names cannot
+                // shadow globs (that happens in macro namespace or with restricted shadowing).
+                //
+                // Additionally, any macro in any module can plant names in the root module if it creates
+                // `macro_export` macros, so the root module effectively has unresolved invocations if any
+                // module has unresolved invocations.
+                // However, it causes resolution/expansion to stuck too often (#53144), so, to make
+                // progress, we have to ignore those potential unresolved invocations from other modules
+                // and prohibit access to macro-expanded `macro_export` macros instead (unless restricted
+                // shadowing is enabled, see `macro_expanded_macro_export_errors`).
+                if binding.determined() || ns == MacroNS || shadowing == Shadowing::Restricted {
+                    return check_usable(self, binding);
+                } else {
+                    return Err((Undetermined, Weak::No));
+                }
+            }
+        } else {
+            return Err(self.create_resolution_in_module_error(
+                module,
+                ident,
+                ns,
+                parent_scope,
+                ignore_binding,
+                ignore_import,
+            ));
+        }
+    }
+
+    fn create_resolution_in_module_error(
+        &mut self,
+        module: Module<'ra>,
+        ident: Ident,
+        ns: Namespace,
+        parent_scope: &ParentScope<'ra>,
+        ignore_binding: Option<NameBinding<'ra>>,
+        ignore_import: Option<Import<'ra>>,
+    ) -> (Determinacy, Weak) {
         // Now we are in situation when new item/import can appear only from a glob or a macro
         // expansion. With restricted shadowing names from globs and macro expansions cannot
         // shadow names from outer scopes, so we can freely fallback from module search to search
@@ -948,7 +1251,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         // Check if one of unexpanded macros can still define the name,
         // if it can then our "no resolution" result is not determined and can be invalidated.
         if !module.unexpanded_invocations.borrow().is_empty() {
-            return Err((Undetermined, Weak::Yes));
+            return (Undetermined, Weak::Yes);
         }
 
         // Check if one of glob imports can still define the name,
@@ -963,7 +1266,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             let module = match glob_import.imported_module.get() {
                 Some(ModuleOrUniformRoot::Module(module)) => module,
                 Some(_) => continue,
-                None => return Err((Undetermined, Weak::Yes)),
+                None => return (Undetermined, Weak::Yes),
             };
             let tmp_parent_scope;
             let (mut adjusted_parent_scope, mut ident) =
@@ -977,6 +1280,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 Some(None) => {}
                 None => continue,
             };
+
+            // TODO this should probably be `resolve_ident_in_glob_module_unadjusted`
             let result = self.resolve_ident_in_module_unadjusted(
                 ModuleOrUniformRoot::Module(module),
                 ident,
@@ -995,28 +1300,24 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 {
                     continue;
                 }
-                Ok(_) | Err((Undetermined, _)) => return Err((Undetermined, Weak::Yes)),
+                Ok(_) | Err((Undetermined, _)) => return (Undetermined, Weak::Yes),
             }
         }
 
         // No resolution and no one else can define the name - determinate error.
-        Err((Determined, Weak::No))
+        (Determined, Weak::No)
     }
 
-    fn finalize_module_binding(
+    fn finalize_non_glob_module_binding(
         &mut self,
         ident: Ident,
-        binding: Option<NameBinding<'ra>>,
-        shadowed_glob: Option<NameBinding<'ra>>,
+        binding: NameBinding<'ra>,
+        glob_binding: Option<NameBinding<'ra>>,
         parent_scope: &ParentScope<'ra>,
         finalize: Finalize,
         shadowing: Shadowing,
     ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
         let Finalize { path_span, report_private, used, root_span, .. } = finalize;
-
-        let Some(binding) = binding else {
-            return Err((Determined, Weak::No));
-        };
 
         if !self.is_accessible_from(binding.vis, parent_scope.module) {
             if report_private {
@@ -1034,7 +1335,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
 
         // Forbid expanded shadowing to avoid time travel.
-        if let Some(shadowed_glob) = shadowed_glob
+        if let Some(shadowed_glob) = glob_binding
             && shadowing == Shadowing::Restricted
             && binding.expansion != LocalExpnId::ROOT
             && binding.res() != shadowed_glob.res()
@@ -1048,6 +1349,43 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 misc1: AmbiguityErrorMisc::None,
                 misc2: AmbiguityErrorMisc::None,
             });
+        }
+
+        if shadowing == Shadowing::Unrestricted
+            && binding.expansion != LocalExpnId::ROOT
+            && let NameBindingKind::Import { import, .. } = binding.kind
+            && matches!(import.kind, ImportKind::MacroExport)
+        {
+            self.macro_expanded_macro_export_errors.insert((path_span, binding.span));
+        }
+
+        self.record_use(ident, binding, used);
+        return Ok(binding);
+    }
+
+    fn finalize_glob_module_binding(
+        &mut self,
+        ident: Ident,
+        binding: NameBinding<'ra>,
+        parent_scope: &ParentScope<'ra>,
+        finalize: Finalize,
+        shadowing: Shadowing,
+    ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
+        let Finalize { path_span, report_private, used, root_span, .. } = finalize;
+
+        if !self.is_accessible_from(binding.vis, parent_scope.module) {
+            if report_private {
+                self.privacy_errors.push(PrivacyError {
+                    ident,
+                    binding,
+                    dedup_span: path_span,
+                    outermost_res: None,
+                    parent_scope: *parent_scope,
+                    single_nested: path_span != root_span,
+                });
+            } else {
+                return Err((Determined, Weak::No));
+            }
         }
 
         if shadowing == Shadowing::Unrestricted
