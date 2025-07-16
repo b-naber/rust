@@ -935,6 +935,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let key = BindingKey::new(ident, ns);
         let resolution =
             self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
+        debug!(?resolution);
 
         let check_usable = |this: &mut Self, binding: NameBinding<'ra>| {
             let usable = this.is_accessible_from(binding.vis, parent_scope.module);
@@ -944,6 +945,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         if let Some(binding) = resolution.non_glob_binding
             && ignore_binding.map_or(true, |b| binding != b)
         {
+            debug!("found non_glob_binding {:?} that isn't equal to ignore_binding", binding);
             if let Some(finalize) = finalize {
                 return self.finalize_non_glob_module_binding(
                     ident,
@@ -1319,6 +1321,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         (Determined, Weak::No)
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn finalize_non_glob_module_binding(
         &mut self,
         ident: Ident,
@@ -1331,6 +1334,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let Finalize { path_span, report_private, used, root_span, .. } = finalize;
 
         if !self.is_accessible_from(binding.vis, parent_scope.module) {
+            debug!(
+                "{:?} not accessible from parent_scope.module {:?}",
+                binding, parent_scope.module
+            );
             if report_private {
                 self.privacy_errors.push(PrivacyError {
                     ident,
@@ -1351,6 +1358,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             && binding.expansion != LocalExpnId::ROOT
             && binding.res() != shadowed_glob.res()
         {
+            debug!("adding ambiguity error GlobVsExpanded");
             self.ambiguity_errors.push(AmbiguityError {
                 kind: AmbiguityKind::GlobVsExpanded,
                 ident,
@@ -1367,6 +1375,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             && let NameBindingKind::Import { import, .. } = binding.kind
             && matches!(import.kind, ImportKind::MacroExport)
         {
+            debug!("adding macro_expanded_macro_export_error");
             self.macro_expanded_macro_export_errors.insert((path_span, binding.span));
         }
 
@@ -1374,6 +1383,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         return Ok(binding);
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn finalize_glob_module_binding(
         &mut self,
         ident: Ident,
@@ -1385,6 +1395,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let Finalize { path_span, report_private, used, root_span, .. } = finalize;
 
         if !self.is_accessible_from(binding.vis, parent_scope.module) {
+            debug!(
+                "{:?} not accessible from parent_scope.module {:?}",
+                binding, parent_scope.module
+            );
             if report_private {
                 self.privacy_errors.push(PrivacyError {
                     ident,
@@ -1404,6 +1418,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             && let NameBindingKind::Import { import, .. } = binding.kind
             && matches!(import.kind, ImportKind::MacroExport)
         {
+            debug!("adding macro_expanded_macro_export_error");
             self.macro_expanded_macro_export_errors.insert((path_span, binding.span));
         }
 
