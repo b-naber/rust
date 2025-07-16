@@ -47,6 +47,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     /// A generic scope visitor.
     /// Visits scopes in order to resolve some identifier in them or perform other actions.
     /// If the callback returns `Some` result, we stop visiting scopes and return it.
+    #[instrument(skip(self, ctxt, visitor), level = "debug")]
     pub(crate) fn visit_scopes<T>(
         &mut self,
         scope_set: ScopeSet<'ra>,
@@ -117,6 +118,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let mut use_prelude = !module.no_implicit_prelude;
 
         loop {
+            debug!(?scope);
             let visit = match scope {
                 // Derive helpers are not in scope when resolving derives in the same container.
                 Scope::DeriveHelpers(expn_id) => {
@@ -393,7 +395,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ignore_import: Option<Import<'ra>>,
     ) -> Result<NameBinding<'ra>, Determinacy> {
         bitflags::bitflags! {
-            #[derive(Clone, Copy)]
+            #[derive(Clone, Copy, Debug)]
             struct Flags: u8 {
                 const MACRO_RULES          = 1 << 0;
                 const MODULE               = 1 << 1;
@@ -520,6 +522,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         }
                     }
                     Scope::NonGlobModule(module, derive_fallback_lint_id) => {
+                        debug!("NonGlobModule scope({:?})", module);
                         let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
                         let binding = this.resolve_ident_in_non_glob_module_unadjusted(
                             ModuleOrUniformRoot::Module(module),
@@ -535,6 +538,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
+                        debug!(?binding);
 
                         match binding {
                             Ok(binding) => {
@@ -569,6 +573,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         }
                     }
                     Scope::GlobModule(module, derive_fallback_lint_id) => {
+                        debug!("GlobModule scope({:?})", module);
                         let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
                         let binding = this.resolve_ident_in_glob_module_unadjusted(
                             ModuleOrUniformRoot::Module(module),
@@ -584,6 +589,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
+                        debug!(?binding);
 
                         match binding {
                             Ok(binding) => {
@@ -698,6 +704,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     },
                 };
 
+                debug!(?result);
                 match result {
                     Ok((binding, flags))
                         if sub_namespace_match(binding.macro_kind(), macro_kind) =>
@@ -786,10 +793,12 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             },
         );
 
+        debug!(?break_result);
         if let Some(break_result) = break_result {
             return break_result;
         }
 
+        debug!(?innermost_result);
         // The first found solution was the only one, return it.
         if let Some((binding, _)) = innermost_result {
             return Ok(binding);
@@ -1000,6 +1009,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ));
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn resolve_ident_in_non_glob_module_unadjusted(
         &mut self,
         module: ModuleOrUniformRoot<'ra>,
@@ -1099,6 +1109,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn resolve_ident_in_glob_module_unadjusted(
         &mut self,
         module: ModuleOrUniformRoot<'ra>,
