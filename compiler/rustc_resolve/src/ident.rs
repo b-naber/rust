@@ -735,6 +735,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     },
                 };
 
+                if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                    eprintln!("result: {:?}", result);
+                }
+
                 debug!(?result);
                 match result {
                     Ok((binding, flags))
@@ -817,12 +821,26 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         }
                     }
                     Ok(..) | Err(Determinacy::Determined) => {}
-                    Err(Determinacy::Undetermined) => determinacy = Determinacy::Undetermined,
+                    Err(Determinacy::Undetermined) => {
+                        // FIXME use a better mechanism for determining `determinacy` for module scopes here.
+                        if let Scope::NonGlobModule(..) = scope {
+                            // we wait for Scope::GlobModule to determine determinacy
+                        } else {
+                            determinacy = Determinacy::Undetermined;
+                        }
+                    }
                 }
 
                 None
             },
         );
+
+        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+            eprintln!(
+                "break_result: {:?}, innermost_result: {:?}, determinacy: {:?}",
+                break_result, innermost_result, determinacy
+            );
+        }
 
         debug!(?break_result);
         if let Some(break_result) = break_result {
