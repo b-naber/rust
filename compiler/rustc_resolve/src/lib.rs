@@ -2225,7 +2225,40 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             .collect();
         let Ok(segments) = segments else { return None };
 
-        match self.maybe_resolve_path(&segments, Some(ns), &parent_scope, None) {
+        let path_resolution_result =
+            self.maybe_resolve_path(&segments, Some(ns), &parent_scope, None);
+        debug!(?path_resolution_result);
+
+        if path_str.contains("The Rust Standard Library")
+            || path_str.contains("TheRust Standard Library")
+        {
+            eprintln!("\n\n\n!!!! TRIGGERING DEBUG LOGS FOR FAILING RUSTDOC PATH !!!!\n\n\n");
+
+            #[allow(unsafe_code)]
+            // SAFETY: This is a temporary debugging hack. We are setting a custom
+            // environment variable that only our own debug prints will read. We
+            // are careful to unset it immediately after the call.
+            unsafe {
+                std::env::set_var("RUSTC_DEBUG_RESOLVER_HACK", "1");
+            }
+
+            let path_resolution_result =
+                self.maybe_resolve_path(&segments, Some(ns), &parent_scope, None);
+
+            #[allow(unsafe_code)]
+            // SAFETY: This is a temporary debugging hack. We are setting a custom
+            // environment variable that only our own debug prints will read. We
+            // are careful to unset it immediately after the call.
+            unsafe {
+                std::env::remove_var("RUSTC_DEBUG_RESOLVER_HACK");
+            }
+
+            eprintln!("path_resolution_result: {:?}", path_resolution_result);
+
+            eprintln!("\n\n\n!!!! ENDING DEBUG LOGS !!!!\n\n\n");
+        }
+
+        match path_resolution_result {
             PathResult::Module(ModuleOrUniformRoot::Module(module)) => Some(module.res().unwrap()),
             PathResult::NonModule(path_res) => {
                 path_res.full_res().filter(|res| !matches!(res, Res::Def(DefKind::Ctor(..), _)))
@@ -2233,7 +2266,12 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             PathResult::Module(ModuleOrUniformRoot::ExternPrelude) | PathResult::Failed { .. } => {
                 None
             }
-            PathResult::Module(..) | PathResult::Indeterminate => unreachable!(),
+            PathResult::Module(..) | PathResult::Indeterminate => {
+                panic!(
+                    "resolve_rustdoc_path({:?}, {:?}) resulted in {:?}. segments: {:?}, parent_scope: {:?}",
+                    path_str, ns, path_resolution_result, segments, parent_scope
+                );
+            }
         }
     }
 

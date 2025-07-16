@@ -876,6 +876,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ignore_binding: Option<NameBinding<'ra>>,
         ignore_import: Option<Import<'ra>>,
     ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
+        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+            eprintln!("resolve_ident_in_module_unadjusted");
+            dbg!(&module, &ident, &ns, &parent_scope, &shadowing, &finalize);
+        }
+
         let module = match module {
             ModuleOrUniformRoot::Module(module) => module,
             ModuleOrUniformRoot::CrateRootAndExternPrelude => {
@@ -932,10 +937,17 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             }
         };
 
+        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+            dbg!(&module);
+        }
+
         let key = BindingKey::new(ident, ns);
         let resolution =
             self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
         debug!(?resolution);
+        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+            dbg!(&resolution);
+        }
 
         let check_usable = |this: &mut Self, binding: NameBinding<'ra>| {
             let usable = this.is_accessible_from(binding.vis, parent_scope.module);
@@ -999,6 +1011,19 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             } else {
                 return Err((Undetermined, Weak::No));
             }
+        }
+
+        // Check if one of single imports can still define the name,
+        // if it can then our result is not determined and can be invalidated.
+        if self.single_import_can_define_name(
+            &resolution,
+            None,
+            ns,
+            ignore_import,
+            ignore_binding,
+            parent_scope,
+        ) {
+            return Err((Undetermined, Weak::No));
         }
 
         return Err(self.create_resolution_in_module_error(
@@ -1837,6 +1862,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ignore_binding: Option<NameBinding<'ra>>,
         ignore_import: Option<Import<'ra>>,
     ) -> PathResult<'ra> {
+        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+            eprintln!("resolve_path_with_ribs");
+            dbg!(&path, &opt_ns, &parent_scope, &finalize);
+        }
+
         let mut module = None;
         let mut module_had_parse_errors = false;
         let mut allow_super = true;
@@ -1948,6 +1978,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             }
 
             let binding = if let Some(module) = module {
+                if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                    eprintln!("trying to resolve ident in module");
+                    dbg!(&ident, &module);
+                }
+
                 self.resolve_ident_in_module(
                     module,
                     ident,
@@ -1961,6 +1996,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             } else if let Some(ribs) = ribs
                 && let Some(TypeNS | ValueNS) = opt_ns
             {
+                if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                    eprintln!("trying to resolve ident in lexical scope");
+                }
+
                 assert!(ignore_import.is_none());
                 match self.resolve_ident_in_lexical_scope(
                     ident,
@@ -1983,6 +2022,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     _ => Err(Determinacy::determined(finalize.is_some())),
                 }
             } else {
+                if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                    eprintln!("trying early resolve lexical scope");
+                }
+
                 self.early_resolve_ident_in_lexical_scope(
                     ident,
                     ScopeSet::All(ns),
@@ -1993,6 +2036,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     ignore_import,
                 )
             };
+            if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                dbg!(&binding);
+            }
 
             match binding {
                 Ok(binding) => {
