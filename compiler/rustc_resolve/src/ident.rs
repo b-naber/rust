@@ -407,6 +407,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
         assert!(force || finalize.is_none()); // `finalize` implies `force`
 
+        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+            eprintln!("early_resolve_ident_in_lexical_scope");
+            dbg!(&orig_ident, &scope_set, &parent_scope, &finalize);
+        }
+
         // Make sure `self`, `super` etc produce an error when passed to here.
         if orig_ident.is_path_segment_keyword() {
             return Err(Determinacy::Determined);
@@ -439,6 +444,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             parent_scope,
             orig_ident.span.ctxt(),
             |this, scope, use_prelude, ctxt| {
+                if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                    eprintln!("early_resolve scope {:?}", scope);
+                }
+
                 let ident = Ident::new(orig_ident.name, orig_ident.span.with_ctxt(ctxt));
                 let result = match scope {
                     Scope::DeriveHelpers(expn_id) => {
@@ -499,6 +508,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         _ => Err(Determinacy::Determined),
                     },
                     Scope::CrateRoot => {
+                        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                            eprintln!("CrateRoot scope");
+                        }
+
                         let root_ident = Ident::new(kw::PathRoot, ident.span);
                         let root_module = this.resolve_crate_root(root_ident);
                         let binding = this.resolve_ident_in_module(
@@ -510,6 +523,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
+                        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                            dbg!(&binding);
+                        }
+
                         match binding {
                             Ok(binding) => Ok((binding, Flags::MODULE | Flags::MISC_SUGGEST_CRATE)),
                             Err((Determinacy::Undetermined, Weak::No)) => {
@@ -523,6 +540,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                     Scope::NonGlobModule(module, derive_fallback_lint_id) => {
                         debug!("NonGlobModule scope({:?})", module);
+                        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                            eprintln!("NonGlobModule scope");
+                        }
                         let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
                         let binding = this.resolve_ident_in_non_glob_module_unadjusted(
                             ModuleOrUniformRoot::Module(module),
@@ -538,6 +558,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
+                        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                            eprintln!("binding: {:?}", binding);
+                        }
+
                         debug!(?binding);
 
                         match binding {
@@ -574,6 +598,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                     Scope::GlobModule(module, derive_fallback_lint_id) => {
                         debug!("GlobModule scope({:?})", module);
+                        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                            eprintln!("GlobModule Scope");
+                        }
+
                         let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
                         let binding = this.resolve_ident_in_glob_module_unadjusted(
                             ModuleOrUniformRoot::Module(module),
@@ -590,6 +618,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_import,
                         );
                         debug!(?binding);
+                        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                            eprintln!("binding: {:?}", binding);
+                        }
 
                         match binding {
                             Ok(binding) => {
@@ -1023,7 +1054,14 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             ignore_binding,
             parent_scope,
         ) {
+            if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                eprintln!("single import can define name");
+            }
             return Err((Undetermined, Weak::No));
+        }
+
+        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+            eprintln!("no resultion from here on");
         }
 
         return Err(self.create_resolution_in_module_error(
@@ -1292,6 +1330,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         // Check if one of unexpanded macros can still define the name,
         // if it can then our "no resolution" result is not determined and can be invalidated.
         if !module.unexpanded_invocations.borrow().is_empty() {
+            if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                eprintln!("no unexpanded invocations -> Undetermined");
+            }
             debug!("no unexpanded invocations -> Undetermined");
             return (Undetermined, Weak::Yes);
         }
@@ -1299,6 +1340,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         // Check if one of glob imports can still define the name,
         // if it can then our "no resolution" result is not determined and can be invalidated.
         for glob_import in module.globs.borrow().iter() {
+            if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                eprintln!("glob import: {:?}", glob_import);
+            }
             debug!(?glob_import);
             if ignore_import == Some(*glob_import) {
                 continue;
@@ -1311,6 +1355,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 Some(_) => continue,
                 None => return (Undetermined, Weak::Yes),
             };
+            if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                eprintln!("module: {:?}", module);
+            }
             debug!(?module);
             let tmp_parent_scope;
             let (mut adjusted_parent_scope, mut ident) =
@@ -1337,6 +1384,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 ignore_import,
             );
             debug!(?result);
+            if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+                dbg!(&result);
+            }
 
             match result {
                 Err((Determined, _)) => continue,
@@ -1347,6 +1397,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 }
                 Ok(_) | Err((Undetermined, _)) => return (Undetermined, Weak::Yes),
             }
+        }
+
+        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
+            eprintln!("no resolution and no one else can define the name");
         }
 
         debug!("no resolution and no one else can define the name");
