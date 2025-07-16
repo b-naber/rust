@@ -73,7 +73,7 @@ use rustc_session::lint::{BuiltinLintDiag, LintBuffer};
 use rustc_span::hygiene::{ExpnId, LocalExpnId, MacroKind, SyntaxContext, Transparency};
 use rustc_span::{DUMMY_SP, Ident, Span, Symbol, kw, sym};
 use smallvec::{SmallVec, smallvec};
-use tracing::debug;
+use tracing::{debug, instrument};
 
 type Res = def::Res<NodeId>;
 
@@ -1943,6 +1943,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         self.record_use_inner(ident, used_binding, used, used_binding.warn_ambiguity);
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn record_use_inner(
         &mut self,
         ident: Ident,
@@ -1966,6 +1967,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             }
         }
         if let NameBindingKind::Import { import, binding } = used_binding.kind {
+            debug!("Import binding kind import: {:?}, binding: {:?}", import, binding);
             if let ImportKind::MacroUse { warn_private: true } = import.kind {
                 // Do not report the lint if the macro name resolves in stdlib prelude
                 // even without the problematic `macro_use` import.
@@ -1998,6 +2000,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 }
             }
             let old_used = self.import_use_map.entry(import).or_insert(used);
+            debug!(?old_used, ?used);
             if *old_used < used {
                 *old_used = used;
             }

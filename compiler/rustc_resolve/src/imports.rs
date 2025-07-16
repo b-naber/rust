@@ -22,7 +22,7 @@ use rustc_span::edit_distance::find_best_match_for_name;
 use rustc_span::hygiene::LocalExpnId;
 use rustc_span::{Ident, Span, Symbol, kw, sym};
 use smallvec::SmallVec;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 use crate::Namespace::*;
 use crate::diagnostics::{DiagMode, Suggestion, import_candidates};
@@ -811,6 +811,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     ///
     /// Meanwhile, if resolve successful, the resolved bindings are written
     /// into the module.
+    #[instrument(skip(self), level = "debug")]
     fn resolve_import(&mut self, import: Import<'ra>) -> usize {
         debug!(
             "(resolving import for module) resolving import `{}::...` in `{}`",
@@ -859,6 +860,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     &import.parent_scope,
                     Some(import),
                 );
+                debug!(?binding_result);
                 let parent = import.parent_scope.module;
                 let binding = match binding_result {
                     Ok(binding) => {
