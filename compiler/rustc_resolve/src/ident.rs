@@ -1075,6 +1075,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             } else {
                 return Err((Undetermined, Weak::No));
             }
+        } else if finalize.is_some() {
+            return Err((Determined, Weak::No));
         }
 
         // Check if one of single imports can still define the name,
@@ -1124,6 +1126,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let key = BindingKey::new(ident, ns);
         let resolution =
             self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
+        debug!(?resolution);
 
         // TODO extract this to method
         let check_usable = |this: &mut Self, binding: NameBinding<'ra>| {
@@ -1146,6 +1149,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             } else {
                 return check_usable(self, binding);
             }
+        } else if finalize.is_some() {
+            return Err((Determined, Weak::No));
         } else {
             // Check if one of single imports can still define the name,
             // if it can then our result is not determined and can be invalidated.
@@ -1157,6 +1162,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 ignore_binding,
                 parent_scope,
             ) {
+                debug!("single import can define name");
                 return Err((Undetermined, Weak::No));
             }
 
@@ -1231,6 +1237,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     return Err((Undetermined, Weak::No));
                 }
             }
+        } else if finalize.is_some() {
+            return Err((Determined, Weak::No));
         } else {
             return Err(self.create_resolution_in_module_error(
                 module,
