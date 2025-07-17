@@ -398,10 +398,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             #[derive(Clone, Copy, Debug)]
             struct Flags: u8 {
                 const MACRO_RULES          = 1 << 0;
-                const MODULE               = 1 << 1;
-                const MISC_SUGGEST_CRATE   = 1 << 2;
-                const MISC_SUGGEST_SELF    = 1 << 3;
-                const MISC_FROM_PRELUDE    = 1 << 4;
+                const NON_GLOB_MODULE      = 1 << 1;
+                const GLOB_MODULE          = 1 << 2;
+                const MISC_SUGGEST_CRATE   = 1 << 3;
+                const MISC_SUGGEST_SELF    = 1 << 4;
+                const MISC_FROM_PRELUDE    = 1 << 5;
             }
         }
 
@@ -514,38 +515,60 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
                         let root_ident = Ident::new(kw::PathRoot, ident.span);
                         let root_module = this.resolve_crate_root(root_ident);
-                        let binding = this.resolve_ident_in_module(
-                            ModuleOrUniformRoot::Module(root_module),
+                        let non_glob_binding = this.resolve_ident_in_non_glob_module_unadjusted(
+                            root_module,
                             ident,
                             ns,
                             parent_scope,
+                            Shadowing::Unrestricted,
                             finalize,
                             ignore_binding,
                             ignore_import,
                         );
-                        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
-                            dbg!(&binding);
-                        }
 
-                        match binding {
-                            Ok(binding) => Ok((binding, Flags::MODULE | Flags::MISC_SUGGEST_CRATE)),
+                        match non_glob_binding {
+                            Ok(binding) => {
+                                Ok((binding, Flags::NON_GLOB_MODULE | Flags::MISC_SUGGEST_CRATE))
+                            }
                             Err((Determinacy::Undetermined, Weak::No)) => {
                                 return Some(Err(Determinacy::determined(force)));
                             }
                             Err((Determinacy::Undetermined, Weak::Yes)) => {
-                                Err(Determinacy::Undetermined)
+                                let glob_binding = this.resolve_ident_in_glob_module_unadjusted(
+                                    root_module,
+                                    ident,
+                                    ns,
+                                    parent_scope,
+                                    Shadowing::Unrestricted,
+                                    finalize,
+                                    ignore_binding,
+                                    ignore_import,
+                                );
+
+                                match glob_binding {
+                                    Ok(binding) => Ok((
+                                        binding,
+                                        Flags::GLOB_MODULE | Flags::MISC_SUGGEST_CRATE,
+                                    )),
+                                    Err((Determinacy::Undetermined, Weak::No)) => {
+                                        return Some(Err(Determinacy::determined(force)));
+                                    }
+                                    Err((Determinacy::Undetermined, Weak::Yes)) => {
+                                        Err(Determinacy::Undetermined)
+                                    }
+                                    Err((Determinacy::Determined, _)) => {
+                                        Err(Determinacy::Determined)
+                                    }
+                                }
                             }
                             Err((Determinacy::Determined, _)) => Err(Determinacy::Determined),
                         }
                     }
                     Scope::NonGlobModule(module, derive_fallback_lint_id) => {
                         debug!("NonGlobModule scope({:?})", module);
-                        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
-                            eprintln!("NonGlobModule scope");
-                        }
                         let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
                         let binding = this.resolve_ident_in_non_glob_module_unadjusted(
-                            ModuleOrUniformRoot::Module(module),
+                            module,
                             ident,
                             ns,
                             adjusted_parent_scope,
@@ -558,10 +581,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
-                        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
-                            eprintln!("binding: {:?}", binding);
-                        }
-
                         debug!(?binding);
 
                         match binding {
@@ -585,7 +604,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                 } else {
                                     Flags::empty()
                                 };
-                                Ok((binding, Flags::MODULE | misc_flags))
+                                Ok((binding, Flags::NON_GLOB_MODULE | misc_flags))
                             }
                             Err((Determinacy::Undetermined, Weak::No)) => {
                                 return Some(Err(Determinacy::determined(force)));
@@ -604,7 +623,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
                         let adjusted_parent_scope = &ParentScope { module, ..*parent_scope };
                         let binding = this.resolve_ident_in_glob_module_unadjusted(
-                            ModuleOrUniformRoot::Module(module),
+                            module,
                             ident,
                             ns,
                             adjusted_parent_scope,
@@ -643,7 +662,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                 } else {
                                     Flags::empty()
                                 };
-                                Ok((binding, Flags::MODULE | misc_flags))
+                                Ok((binding, Flags::GLOB_MODULE | misc_flags))
                             }
                             Err((Determinacy::Undetermined, Weak::No)) => {
                                 return Some(Err(Determinacy::determined(force)));
@@ -739,7 +758,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     eprintln!("result: {:?}", result);
                 }
 
-                debug!(?result);
+                debug!(?result, ?innermost_result);
                 match result {
                     Ok((binding, flags))
                         if sub_namespace_match(binding.macro_kind(), macro_kind) =>
@@ -751,7 +770,14 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                         if let Some((innermost_binding, innermost_flags)) = innermost_result {
                             // Found another solution, if the first one was "weak", report an error.
                             let (res, innermost_res) = (binding.res(), innermost_binding.res());
-                            if res != innermost_res {
+
+                            // ignore glob module resolution if we have a non-glob module resolution
+                            let ignore_innermost_result = flags.contains(Flags::GLOB_MODULE)
+                                && innermost_flags.contains(Flags::NON_GLOB_MODULE);
+
+                            debug!(?res, ?innermost_res);
+                            debug!(?flags, ?innermost_flags);
+                            if res != innermost_res && !ignore_innermost_result {
                                 let is_builtin = |res| {
                                     matches!(res, Res::NonMacroAttr(NonMacroAttrKind::Builtin(..)))
                                 };
@@ -769,13 +795,14 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                 {
                                     Some(AmbiguityKind::DeriveHelper)
                                 } else if innermost_flags.contains(Flags::MACRO_RULES)
-                                    && flags.contains(Flags::MODULE)
+                                    && flags.contains(Flags::NON_GLOB_MODULE | Flags::GLOB_MODULE)
                                     && !this.disambiguate_macro_rules_vs_modularized(
                                         innermost_binding,
                                         binding,
                                     )
                                     || flags.contains(Flags::MACRO_RULES)
-                                        && innermost_flags.contains(Flags::MODULE)
+                                        && innermost_flags
+                                            .contains(Flags::NON_GLOB_MODULE | Flags::GLOB_MODULE)
                                         && !this.disambiguate_macro_rules_vs_modularized(
                                             binding,
                                             innermost_binding,
@@ -824,7 +851,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     Err(Determinacy::Undetermined) => {
                         // FIXME use a better mechanism for determining `determinacy` for module scopes here.
                         if let Scope::NonGlobModule(..) = scope {
-                            // we wait for Scope::GlobModule to determine determinacy
+                            // we wait for Scope::GlobModule to determine `determinacy`
                         } else {
                             determinacy = Determinacy::Undetermined;
                         }
@@ -925,11 +952,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ignore_binding: Option<NameBinding<'ra>>,
         ignore_import: Option<Import<'ra>>,
     ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
-        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
-            eprintln!("resolve_ident_in_module_unadjusted");
-            dbg!(&module, &ident, &ns, &parent_scope, &shadowing, &finalize);
-        }
-
         let module = match module {
             ModuleOrUniformRoot::Module(module) => module,
             ModuleOrUniformRoot::CrateRootAndExternPrelude => {
@@ -986,17 +1008,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             }
         };
 
-        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
-            dbg!(&module);
-        }
-
         let key = BindingKey::new(ident, ns);
         let resolution =
             self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
         debug!(?resolution);
-        if std::env::var("RUSTC_DEBUG_RESOLVER_HACK").is_ok() {
-            dbg!(&resolution);
-        }
 
         let check_usable = |this: &mut Self, binding: NameBinding<'ra>| {
             let usable = this.is_accessible_from(binding.vis, parent_scope.module);
@@ -1095,7 +1110,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     #[instrument(skip(self), level = "debug")]
     fn resolve_ident_in_non_glob_module_unadjusted(
         &mut self,
-        module: ModuleOrUniformRoot<'ra>,
+        module: Module<'ra>,
         ident: Ident,
         ns: Namespace,
         parent_scope: &ParentScope<'ra>,
@@ -1106,62 +1121,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ignore_binding: Option<NameBinding<'ra>>,
         ignore_import: Option<Import<'ra>>,
     ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
-        let module = match module {
-            ModuleOrUniformRoot::Module(module) => module,
-            ModuleOrUniformRoot::CrateRootAndExternPrelude => {
-                assert_eq!(shadowing, Shadowing::Unrestricted);
-                let binding = self.early_resolve_ident_in_lexical_scope(
-                    ident,
-                    ScopeSet::AbsolutePath(ns),
-                    parent_scope,
-                    finalize,
-                    finalize.is_some(),
-                    ignore_binding,
-                    ignore_import,
-                );
-
-                return binding.map_err(|determinacy| (determinacy, Weak::No));
-            }
-            ModuleOrUniformRoot::ExternPrelude => {
-                assert_eq!(shadowing, Shadowing::Unrestricted);
-                return if ns != TypeNS {
-                    Err((Determined, Weak::No))
-                } else if let Some(binding) = self.extern_prelude_get(ident, finalize.is_some()) {
-                    Ok(binding)
-                } else if !self.graph_root.unexpanded_invocations.borrow().is_empty() {
-                    // Macro-expanded `extern crate` items can add names to extern prelude.
-                    Err((Undetermined, Weak::No))
-                } else {
-                    Err((Determined, Weak::No))
-                };
-            }
-            ModuleOrUniformRoot::CurrentScope => {
-                assert_eq!(shadowing, Shadowing::Unrestricted);
-                if ns == TypeNS {
-                    if ident.name == kw::Crate || ident.name == kw::DollarCrate {
-                        let module = self.resolve_crate_root(ident);
-                        return Ok(self.module_self_bindings[&module]);
-                    } else if ident.name == kw::Super || ident.name == kw::SelfLower {
-                        // FIXME: Implement these with renaming requirements so that e.g.
-                        // `use super;` doesn't work, but `use super as name;` does.
-                        // Fall through here to get an error from `early_resolve_...`.
-                    }
-                }
-
-                let binding = self.early_resolve_ident_in_lexical_scope(
-                    ident,
-                    ScopeSet::All(ns),
-                    parent_scope,
-                    finalize,
-                    finalize.is_some(),
-                    ignore_binding,
-                    ignore_import,
-                );
-
-                return binding.map_err(|determinacy| (determinacy, Weak::No));
-            }
-        };
-
         let key = BindingKey::new(ident, ns);
         let resolution =
             self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
@@ -1188,6 +1147,19 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 return check_usable(self, binding);
             }
         } else {
+            // Check if one of single imports can still define the name,
+            // if it can then our result is not determined and can be invalidated.
+            if self.single_import_can_define_name(
+                &resolution,
+                None,
+                ns,
+                ignore_import,
+                ignore_binding,
+                parent_scope,
+            ) {
+                return Err((Undetermined, Weak::No));
+            }
+
             return Err((Determinacy::Undetermined, Weak::Yes));
         }
     }
@@ -1195,7 +1167,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     #[instrument(skip(self), level = "debug")]
     fn resolve_ident_in_glob_module_unadjusted(
         &mut self,
-        module: ModuleOrUniformRoot<'ra>,
+        module: Module<'ra>,
         ident: Ident,
         ns: Namespace,
         parent_scope: &ParentScope<'ra>,
@@ -1206,62 +1178,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ignore_binding: Option<NameBinding<'ra>>,
         ignore_import: Option<Import<'ra>>,
     ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
-        let module = match module {
-            ModuleOrUniformRoot::Module(module) => module,
-            ModuleOrUniformRoot::CrateRootAndExternPrelude => {
-                assert_eq!(shadowing, Shadowing::Unrestricted);
-                let binding = self.early_resolve_ident_in_lexical_scope(
-                    ident,
-                    ScopeSet::AbsolutePath(ns),
-                    parent_scope,
-                    finalize,
-                    finalize.is_some(),
-                    ignore_binding,
-                    ignore_import,
-                );
-
-                return binding.map_err(|determinacy| (determinacy, Weak::No));
-            }
-            ModuleOrUniformRoot::ExternPrelude => {
-                assert_eq!(shadowing, Shadowing::Unrestricted);
-                return if ns != TypeNS {
-                    Err((Determined, Weak::No))
-                } else if let Some(binding) = self.extern_prelude_get(ident, finalize.is_some()) {
-                    Ok(binding)
-                } else if !self.graph_root.unexpanded_invocations.borrow().is_empty() {
-                    // Macro-expanded `extern crate` items can add names to extern prelude.
-                    Err((Undetermined, Weak::No))
-                } else {
-                    Err((Determined, Weak::No))
-                };
-            }
-            ModuleOrUniformRoot::CurrentScope => {
-                assert_eq!(shadowing, Shadowing::Unrestricted);
-                if ns == TypeNS {
-                    if ident.name == kw::Crate || ident.name == kw::DollarCrate {
-                        let module = self.resolve_crate_root(ident);
-                        return Ok(self.module_self_bindings[&module]);
-                    } else if ident.name == kw::Super || ident.name == kw::SelfLower {
-                        // FIXME: Implement these with renaming requirements so that e.g.
-                        // `use super;` doesn't work, but `use super as name;` does.
-                        // Fall through here to get an error from `early_resolve_...`.
-                    }
-                }
-
-                let binding = self.early_resolve_ident_in_lexical_scope(
-                    ident,
-                    ScopeSet::All(ns),
-                    parent_scope,
-                    finalize,
-                    finalize.is_some(),
-                    ignore_binding,
-                    ignore_import,
-                );
-
-                return binding.map_err(|determinacy| (determinacy, Weak::No));
-            }
-        };
-
         let key = BindingKey::new(ident, ns);
         let resolution =
             self.resolution(module, key).try_borrow_mut().map_err(|_| (Determined, Weak::No))?; // This happens when there is a cycle of imports.
@@ -1481,6 +1397,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             && matches!(import.kind, ImportKind::MacroExport)
         {
             debug!("adding macro_expanded_macro_export_error");
+            debug!(
+                "macro_expanded_macro_export_errors: {:?}, path_span: {:?}, binding.span: {:?}",
+                self.macro_expanded_macro_export_errors, path_span, binding.span
+            );
             self.macro_expanded_macro_export_errors.insert((path_span, binding.span));
         }
 
@@ -1524,6 +1444,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             && matches!(import.kind, ImportKind::MacroExport)
         {
             debug!("adding macro_expanded_macro_export_error");
+            debug!(
+                "macro_expanded_macro_export_errors: {:?}, path_span: {:?}, binding.span: {:?}",
+                self.macro_expanded_macro_export_errors, path_span, binding.span
+            );
             self.macro_expanded_macro_export_errors.insert((path_span, binding.span));
         }
 
