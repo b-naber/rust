@@ -795,14 +795,15 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                 {
                                     Some(AmbiguityKind::DeriveHelper)
                                 } else if innermost_flags.contains(Flags::MACRO_RULES)
-                                    && flags.contains(Flags::NON_GLOB_MODULE | Flags::GLOB_MODULE)
+                                    && (flags.contains(Flags::NON_GLOB_MODULE)
+                                        || flags.contains(Flags::GLOB_MODULE))
                                     && !this.disambiguate_macro_rules_vs_modularized(
                                         innermost_binding,
                                         binding,
                                     )
                                     || flags.contains(Flags::MACRO_RULES)
-                                        && innermost_flags
-                                            .contains(Flags::NON_GLOB_MODULE | Flags::GLOB_MODULE)
+                                        && (innermost_flags.contains(Flags::NON_GLOB_MODULE)
+                                            || flags.contains(Flags::GLOB_MODULE))
                                         && !this.disambiguate_macro_rules_vs_modularized(
                                             binding,
                                             innermost_binding,
