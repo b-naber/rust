@@ -186,15 +186,13 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                     MacroRulesScope::Empty => Scope::NonGlobModule(module, None),
                 },
-                Scope::NonGlobModule(..) | Scope::GlobModule(..) if module_and_extern_prelude => {
-                    match ns {
-                        TypeNS => {
-                            ctxt.adjust(ExpnId::root());
-                            Scope::ExternPrelude
-                        }
-                        ValueNS | MacroNS => break,
+                Scope::GlobModule(..) if module_and_extern_prelude => match ns {
+                    TypeNS => {
+                        ctxt.adjust(ExpnId::root());
+                        Scope::ExternPrelude
                     }
-                }
+                    ValueNS | MacroNS => break,
+                },
                 Scope::NonGlobModule(module, prev_lint_id) => {
                     use_prelude = !module.no_implicit_prelude;
                     Scope::GlobModule(module, prev_lint_id)
@@ -712,7 +710,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                                     )
                                     || flags.contains(Flags::MACRO_RULES)
                                         && (innermost_flags.contains(Flags::NON_GLOB_MODULE)
-                                            || flags.contains(Flags::GLOB_MODULE))
+                                            || innermost_flags.contains(Flags::GLOB_MODULE))
                                         && !this.disambiguate_macro_rules_vs_modularized(
                                             binding,
                                             innermost_binding,
