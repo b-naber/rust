@@ -23,7 +23,7 @@ use rustc_span::edit_distance::find_best_match_for_name;
 use rustc_span::hygiene::LocalExpnId;
 use rustc_span::{Ident, Span, Symbol, kw, sym};
 use smallvec::SmallVec;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 use crate::Namespace::{self, *};
 use crate::diagnostics::{DiagMode, Suggestion, import_candidates};
@@ -550,6 +550,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
     /// Resolves all imports for the crate. This method performs the fixed-
     /// point iteration.
+    #[instrument(skip(self), level = "debug")]
     pub(crate) fn resolve_imports(&mut self) {
         let mut prev_indeterminate_count = usize::MAX;
         let mut indeterminate_count = self.indeterminate_imports.len() * 3;
@@ -558,6 +559,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             indeterminate_count = 0;
             for import in mem::take(&mut self.indeterminate_imports) {
                 let import_indeterminate_count = self.resolve_import(import);
+                debug!(?import_indeterminate_count);
                 indeterminate_count += import_indeterminate_count;
                 match import_indeterminate_count {
                     0 => self.determined_imports.push(import),
@@ -565,8 +567,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 }
             }
         }
+        debug!("indeterminate imports: {:?}", self.indeterminate_imports);
     }
 
+    #[instrument(skip(self), level = "debug")]
     pub(crate) fn finalize_imports(&mut self) {
         for module in self.arenas.local_modules().iter() {
             self.finalize_resolutions_in(*module);
@@ -584,12 +588,18 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             .map(|i| (false, i))
             .chain(indeterminate_imports.iter().map(|i| (true, i)))
         {
+            debug!(?import);
             let unresolved_import_error = self.finalize_import(*import);
+            debug!(?unresolved_import_error);
             // If this import is unresolved then create a dummy import
             // resolution for it so that later resolve stages won't complain.
             self.import_dummy_binding(*import, is_indeterminate);
 
-            let Some(err) = unresolved_import_error else { continue };
+            let Some(err) = unresolved_import_error else {
+                debug!("continuing");
+                continue;
+            };
+            debug!(?err);
 
             glob_error |= import.is_glob();
 
@@ -601,14 +611,17 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 continue;
             }
 
+            debug!(?errors);
             if prev_root_id != NodeId::ZERO && prev_root_id != import.root_id && !errors.is_empty()
             {
                 // In the case of a new import line, throw a diagnostic message
                 // for the previous line.
+                debug!("reporting previous error");
                 self.throw_unresolved_import_error(errors, glob_error);
                 errors = vec![];
             }
             if seen_spans.insert(err.span) {
+                debug!("adding non previously seen error for import {:?}", import);
                 errors.push((*import, err));
                 prev_root_id = import.root_id;
             }
@@ -637,6 +650,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     segment: None,
                     module: None,
                 };
+                debug!("adding error for import {:?}", import);
                 errors.push((*import, err))
             }
         }
@@ -729,6 +743,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn throw_unresolved_import_error(
         &mut self,
         mut errors: Vec<(Import<'_>, UnresolvedImportError)>,
@@ -829,6 +844,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         if glob_error {
             self.glob_error = Some(guar);
         }
+
+        panic!("stop here");
     }
 
     /// Attempts to resolve the given import, returning:
@@ -837,6 +854,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     ///
     /// Meanwhile, if resolve successful, the resolved bindings are written
     /// into the module.
+    #[instrument(skip(self), level = "debug")]
     fn resolve_import(&mut self, import: Import<'ra>) -> usize {
         debug!(
             "(resolving import for module) resolving import `{}::...` in `{}`",
@@ -852,6 +870,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 &import.parent_scope,
                 Some(import),
             );
+            debug!(?path_res);
 
             match path_res {
                 PathResult::Module(module) => module,
@@ -860,6 +879,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             }
         };
 
+        debug!(?module);
         import.imported_module.set(Some(module));
         let (source, target, bindings, type_ns_only) = match import.kind {
             ImportKind::Single { source, target, ref bindings, type_ns_only, .. } => {
@@ -885,6 +905,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     &import.parent_scope,
                     Some(import),
                 );
+                debug!(?binding_result);
                 let parent = import.parent_scope.module;
                 let binding = match binding_result {
                     Ok(binding) => {
@@ -930,6 +951,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     ///
     /// Optionally returns an unresolved import error. This error is buffered and used to
     /// consolidate multiple unresolved import errors into a single diagnostic.
+    #[instrument(skip(self), level = "debug")]
     fn finalize_import(&mut self, import: Import<'ra>) -> Option<UnresolvedImportError> {
         let ignore_binding = match &import.kind {
             ImportKind::Single { bindings, .. } => bindings[TypeNS].get().binding(),
@@ -951,6 +973,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             ignore_binding,
             Some(import),
         );
+        debug!(?path_res);
 
         let no_ambiguity =
             ambiguity_errors_len(&self.ambiguity_errors) == prev_ambiguity_errors_len;
@@ -1464,6 +1487,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         false
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn resolve_glob_import(&mut self, import: Import<'ra>) {
         // This function is only called for glob imports.
         let ImportKind::Glob { id, is_prelude, .. } = import.kind else { unreachable!() };
@@ -1531,6 +1555,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
     // Miscellaneous post-processing, including recording re-exports,
     // reporting conflicts, and reporting unresolved imports.
+    #[instrument(skip(self), level = "debug")]
     fn finalize_resolutions_in(&mut self, module: Module<'ra>) {
         // Since import resolution is finished, globs will not define any more names.
         *module.globs.borrow_mut() = Vec::new();

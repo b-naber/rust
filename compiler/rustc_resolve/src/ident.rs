@@ -50,6 +50,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     /// A generic scope visitor.
     /// Visits scopes in order to resolve some identifier in them or perform other actions.
     /// If the callback returns `Some` result, we stop visiting scopes and return it.
+    #[instrument(skip(self, ctxt, visitor), level = "debug")]
     pub(crate) fn visit_scopes<T>(
         &mut self,
         scope_set: ScopeSet<'ra>,
@@ -114,6 +115,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             // Jump out of trait or enum modules, they do not act as scopes.
             _ => parent_scope.module.nearest_item_scope(),
         };
+        debug!(?module);
 
         let module_scope = matches!(scope_set, ScopeSet::Module(..));
         let module_and_extern_prelude = matches!(scope_set, ScopeSet::ModuleAndExternPrelude(..));
@@ -436,6 +438,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             parent_scope,
             orig_ident.span.ctxt(),
             |this, scope, use_prelude, ctxt| {
+                debug!("visiting with scope {:?}", scope);
                 let ident = Ident::new(orig_ident.name, orig_ident.span.with_ctxt(ctxt));
                 let result = match scope {
                     Scope::DeriveHelpers(expn_id) => {
@@ -520,6 +523,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
+                        debug!(?binding);
 
                         match binding {
                             Ok(binding) => {
@@ -569,6 +573,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ignore_binding,
                             ignore_import,
                         );
+                        debug!(?binding);
 
                         match binding {
                             Ok(binding) => {
@@ -672,6 +677,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     },
                 };
 
+                debug!(?result);
+                debug!(?innermost_result);
                 match result {
                     Ok((binding, flags))
                         if sub_namespace_match(binding.macro_kind(), macro_kind) =>
