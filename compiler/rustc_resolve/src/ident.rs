@@ -949,6 +949,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         }
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn resolve_ident_in_non_glob_module_unadjusted(
         &mut self,
         module: Module<'ra>,
@@ -996,6 +997,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         Err((Determinacy::determined(finalize.is_some()), Weak::Yes))
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn resolve_ident_in_glob_module_unadjusted(
         &mut self,
         module: Module<'ra>,
