@@ -19,7 +19,7 @@ use crate::{
     AmbiguityError, AmbiguityErrorMisc, AmbiguityKind, BindingKey, Determinacy, Finalize,
     ImportKind, LexicalScopeBinding, Module, ModuleKind, ModuleOrUniformRoot, NameBinding,
     NameBindingKind, ParentScope, PathResult, PrivacyError, Res, ResolutionError, Resolver, Scope,
-    ScopeSet, Segment, Used, Weak, errors,
+    ScopeSet, Segment, Shadowing, Used, Weak, errors,
 };
 
 #[derive(Copy, Clone)]
@@ -32,12 +32,6 @@ impl From<UsePrelude> for bool {
     fn from(up: UsePrelude) -> bool {
         matches!(up, UsePrelude::Yes)
     }
-}
-
-#[derive(Debug, PartialEq, Clone, Copy)]
-enum Shadowing {
-    Restricted,
-    Unrestricted,
 }
 
 bitflags::bitflags! {
@@ -108,18 +102,23 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let (ns, macro_kind) = match scope_set {
             ScopeSet::All(ns)
             | ScopeSet::ModuleAndExternPrelude(ns, _)
-            | ScopeSet::Late(ns, ..) => (ns, None),
+            | ScopeSet::Module(_, ns, _) => (ns, None),
+            ScopeSet::Late(ns, ..) => (ns, None),
             ScopeSet::Macro(macro_kind) => (MacroNS, Some(macro_kind)),
         };
         let module = match scope_set {
             // Start with the specified module.
-            ScopeSet::Late(_, module, _) | ScopeSet::ModuleAndExternPrelude(_, module) => module,
+            ScopeSet::Late(_, module, _)
+            | ScopeSet::ModuleAndExternPrelude(_, module)
+            | ScopeSet::Module(module, ..) => module,
             // Jump out of trait or enum modules, they do not act as scopes.
             _ => parent_scope.module.nearest_item_scope(),
         };
+
+        let module_scope = matches!(scope_set, ScopeSet::Module(..));
         let module_and_extern_prelude = matches!(scope_set, ScopeSet::ModuleAndExternPrelude(..));
         let mut scope = match ns {
-            _ if module_and_extern_prelude => Scope::NonGlobModule(module, None),
+            _ if (module_and_extern_prelude || module_scope) => Scope::NonGlobModule(module, None),
             TypeNS | ValueNS => Scope::NonGlobModule(module, None),
             MacroNS => Scope::DeriveHelpers(parent_scope.expansion),
         };
@@ -193,6 +192,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                     ValueNS | MacroNS => break,
                 },
+                Scope::GlobModule(..) if module_scope => break,
                 Scope::NonGlobModule(module, prev_lint_id) => {
                     use_prelude = !module.no_implicit_prelude;
                     Scope::GlobModule(module, prev_lint_id)
@@ -411,7 +411,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let (ns, macro_kind) = match scope_set {
             ScopeSet::All(ns)
             | ScopeSet::ModuleAndExternPrelude(ns, _)
-            | ScopeSet::Late(ns, ..) => (ns, None),
+            | ScopeSet::Module(_, ns, _) => (ns, None),
+            ScopeSet::Late(ns, ..) => (ns, None),
             ScopeSet::Macro(macro_kind) => (MacroNS, Some(macro_kind)),
         };
 
@@ -494,7 +495,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     },
                     Scope::NonGlobModule(module, derive_fallback_lint_id) => {
                         let (adjusted_parent_scope, finalize) =
-                            if matches!(scope_set, ScopeSet::ModuleAndExternPrelude(..)) {
+                            if matches!(scope_set, ScopeSet::ModuleAndExternPrelude(..))
+                                || matches!(scope_set, ScopeSet::Module(..))
+                            {
                                 (parent_scope, finalize)
                             } else {
                                 (
@@ -508,10 +511,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ident,
                             ns,
                             adjusted_parent_scope,
-                            if matches!(scope_set, ScopeSet::Late(..)) {
-                                Shadowing::Unrestricted
-                            } else {
-                                Shadowing::Restricted
+                            match scope_set {
+                                ScopeSet::Late(..) => Shadowing::Unrestricted,
+                                ScopeSet::Module(_, _, shadowing) => shadowing,
+                                _ => Shadowing::Restricted,
                             },
                             finalize,
                             ignore_binding,
@@ -541,7 +544,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                     Scope::GlobModule(module, derive_fallback_lint_id) => {
                         let (adjusted_parent_scope, finalize) =
-                            if matches!(scope_set, ScopeSet::ModuleAndExternPrelude(..)) {
+                            if matches!(scope_set, ScopeSet::ModuleAndExternPrelude(..))
+                                || matches!(scope_set, ScopeSet::Module(..))
+                            {
                                 (parent_scope, finalize)
                             } else {
                                 (
@@ -555,10 +560,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                             ident,
                             ns,
                             adjusted_parent_scope,
-                            if matches!(scope_set, ScopeSet::Late(..)) {
-                                Shadowing::Unrestricted
-                            } else {
-                                Shadowing::Restricted
+                            match scope_set {
+                                ScopeSet::Late(..) => Shadowing::Unrestricted,
+                                ScopeSet::Module(_, _, shadowing) => shadowing,
+                                _ => Shadowing::Restricted,
                             },
                             finalize.map(|finalize| Finalize { used: Used::Scope, ..finalize }),
                             ignore_binding,
@@ -818,7 +823,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         ignore_import: Option<Import<'ra>>,
     ) -> Result<NameBinding<'ra>, Determinacy> {
         self.resolve_ident_in_module(module, ident, ns, parent_scope, None, None, ignore_import)
-            .map_err(|(determinacy, _)| determinacy)
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -831,7 +835,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         finalize: Option<Finalize>,
         ignore_binding: Option<NameBinding<'ra>>,
         ignore_import: Option<Import<'ra>>,
-    ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
+    ) -> Result<NameBinding<'ra>, Determinacy> {
         let tmp_parent_scope;
         let mut adjusted_parent_scope = parent_scope;
         match module {
@@ -876,12 +880,20 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         // "self-confirming" import resolutions during import validation and checking.
         ignore_binding: Option<NameBinding<'ra>>,
         ignore_import: Option<Import<'ra>>,
-    ) -> Result<NameBinding<'ra>, (Determinacy, Weak)> {
-        let module = match module {
-            ModuleOrUniformRoot::Module(module) => module,
+    ) -> Result<NameBinding<'ra>, Determinacy> {
+        match module {
+            ModuleOrUniformRoot::Module(module) => self.early_resolve_ident_in_lexical_scope(
+                ident,
+                ScopeSet::Module(module, ns, shadowing),
+                parent_scope,
+                finalize,
+                finalize.is_some(),
+                ignore_binding,
+                ignore_import,
+            ),
             ModuleOrUniformRoot::ModuleAndExternPrelude(module) => {
                 assert_eq!(shadowing, Shadowing::Unrestricted);
-                let binding = self.early_resolve_ident_in_lexical_scope(
+                self.early_resolve_ident_in_lexical_scope(
                     ident,
                     ScopeSet::ModuleAndExternPrelude(ns, module),
                     parent_scope,
@@ -889,20 +901,19 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     finalize.is_some(),
                     ignore_binding,
                     ignore_import,
-                );
-                return binding.map_err(|determinacy| (determinacy, Weak::No));
+                )
             }
             ModuleOrUniformRoot::ExternPrelude => {
                 assert_eq!(shadowing, Shadowing::Unrestricted);
                 return if ns != TypeNS {
-                    Err((Determined, Weak::No))
+                    Err(Determined)
                 } else if let Some(binding) = self.extern_prelude_get(ident, finalize.is_some()) {
                     Ok(binding)
                 } else if !self.graph_root.unexpanded_invocations.borrow().is_empty() {
                     // Macro-expanded `extern crate` items can add names to extern prelude.
-                    Err((Undetermined, Weak::No))
+                    Err(Undetermined)
                 } else {
-                    Err((Determined, Weak::No))
+                    Err(Determined)
                 };
             }
             ModuleOrUniformRoot::CurrentScope => {
@@ -918,7 +929,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     }
                 }
 
-                let binding = self.early_resolve_ident_in_lexical_scope(
+                self.early_resolve_ident_in_lexical_scope(
                     ident,
                     ScopeSet::All(ns),
                     parent_scope,
@@ -926,39 +937,9 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     finalize.is_some(),
                     ignore_binding,
                     ignore_import,
-                );
-                return binding.map_err(|determinacy| (determinacy, Weak::No));
+                )
             }
-        };
-
-        match self.resolve_ident_in_non_glob_module_unadjusted(
-            module,
-            ident,
-            ns,
-            parent_scope,
-            shadowing,
-            finalize,
-            ignore_binding,
-            ignore_import,
-        ) {
-            Ok(binding) => return Ok(binding),
-            Err((_, Weak::No)) => {
-                return Err((Determined, Weak::No));
-            }
-            // no non-glob binding was found, check for glob binding
-            Err((_, Weak::Yes)) => {}
         }
-
-        self.resolve_ident_in_glob_module_unadjusted(
-            module,
-            ident,
-            ns,
-            parent_scope,
-            shadowing,
-            finalize,
-            ignore_binding,
-            ignore_import,
-        )
     }
 
     fn resolve_ident_in_non_glob_module_unadjusted(
@@ -1163,13 +1144,13 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
             );
 
             match result {
-                Err((Determined, _)) => continue,
+                Err(Determined) => continue,
                 Ok(binding)
                     if !self.is_accessible_from(binding.vis, glob_import.parent_scope.module) =>
                 {
                     continue;
                 }
-                Ok(_) | Err((Undetermined, _)) => return (Undetermined, Weak::Yes),
+                Ok(_) | Err(Undetermined) => return (Undetermined, Weak::Yes),
             }
         }
 
@@ -1319,13 +1300,13 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                 ignore_binding,
                 ignore_import,
             ) {
-                Err((Determined, _)) => continue,
+                Err(Determined) => continue,
                 Ok(binding)
                     if !self.is_accessible_from(binding.vis, single_import.parent_scope.module) =>
                 {
                     continue;
                 }
-                Ok(_) | Err((Undetermined, _)) => {
+                Ok(_) | Err(Undetermined) => {
                     return true;
                 }
             }
@@ -1795,7 +1776,6 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     ignore_binding,
                     ignore_import,
                 )
-                .map_err(|(determinacy, _)| determinacy)
             } else if let Some(ribs) = ribs
                 && let Some(TypeNS | ValueNS) = opt_ns
             {
