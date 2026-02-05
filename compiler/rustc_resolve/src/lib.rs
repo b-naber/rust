@@ -1121,7 +1121,13 @@ struct ExternPreludeEntry<'ra> {
     /// `flag_decl` is `None`, or when `extern crate` introducing `item_decl` used renaming.
     item_decl: Option<(Decl<'ra>, Span, /* introduced by item */ bool)>,
     /// Name declaration from an `--extern` flag, lazily populated on first use.
-    flag_decl: Option<CacheCell<(PendingDecl<'ra>, /* finalized */ bool)>>,
+    flag_decl: Option<
+        CacheCell<(
+            PendingDecl<'ra>,
+            /* finalized */ bool,
+            /* virtual flag (namespaced crate) */ bool,
+        )>,
+    >,
 }
 
 impl ExternPreludeEntry<'_> {
@@ -1132,7 +1138,14 @@ impl ExternPreludeEntry<'_> {
     fn flag() -> Self {
         ExternPreludeEntry {
             item_decl: None,
-            flag_decl: Some(CacheCell::new((PendingDecl::Pending, false))),
+            flag_decl: Some(CacheCell::new((PendingDecl::Pending, false, false))),
+        }
+    }
+
+    fn virtual_flag() -> Self {
+        ExternPreludeEntry {
+            item_decl: None,
+            flag_decl: Some(CacheCell::new((PendingDecl::Pending, false, true))),
         }
     }
 
@@ -1621,56 +1634,8 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let mut invocation_parents = FxHashMap::default();
         invocation_parents.insert(LocalExpnId::ROOT, InvocationParent::ROOT);
 
-        let namespaced_crate_names: FxHashMap<&str, Vec<&str>> = tcx
-            .sess
-            .opts
-            .externs
-            .iter()
-            .filter(|(name, _)| is_namespaced_crate(name))
-            .map(|(name, _)| {
-                let main_crate_name = name
-                    .split("::")
-                    .nth(0)
-                    .expect(&format!("namespaced crate name has unexpected form {}", name));
-                (main_crate_name, name.as_str())
-            })
-            .fold(FxHashMap::default(), |mut acc_map, (main_name, full_name)| {
-                acc_map.entry(main_name).or_insert_with(Vec::new).push(full_name);
-                acc_map
-            });
-
-        let mut extern_prelude: FxIndexMap<_, _> = tcx
-            .sess
-            .opts
-            .externs
-            .iter()
-            .filter_map(|(name, entry)| {
-                // Make sure `self`, `super`, `_` etc do not get into extern prelude.
-                // FIXME: reject `--extern self` and similar in option parsing instead.
-                if entry.add_prelude
-                    && let name = Symbol::intern(name)
-                    && name.can_be_raw()
-                {
-                    // TODO need to add a virtual flag here
-                    let ident = IdentKey::with_root_ctxt(name);
-                    Some((ident, ExternPreludeEntry::flag()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        debug!(?extern_prelude);
-
-        if !attr::contains_name(attrs, sym::no_core) {
-            let ident = IdentKey::with_root_ctxt(sym::core);
-            extern_prelude.insert(ident, ExternPreludeEntry::flag());
-            if !attr::contains_name(attrs, sym::no_std) {
-                let ident = IdentKey::with_root_ctxt(sym::std);
-                extern_prelude.insert(ident, ExternPreludeEntry::flag());
-            }
-        }
-
+        let namespaced_crate_names = get_namespaced_crate_names(tcx);
+        let extern_prelude = build_extern_prelude(tcx, attrs);
         let registered_tools = tcx.registered_tools(());
         let edition = tcx.sess.edition();
 
@@ -2336,11 +2301,11 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         let entry = self.extern_prelude.get(&ident);
         debug!(?entry);
         entry.and_then(|entry| entry.flag_decl.as_ref()).and_then(|flag_decl| {
-            let (pending_decl, finalized) = flag_decl.get();
+            let (pending_decl, finalized, is_virtual) = flag_decl.get();
             debug!(?pending_decl);
             let decl = match pending_decl {
                 PendingDecl::Ready(decl) => {
-                    if finalize && !finalized {
+                    if finalize && !finalize && !is_virtual {
                         self.cstore_mut().process_path_extern(
                             self.tcx,
                             ident.name,
@@ -2354,7 +2319,12 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     let crate_id = if finalize {
                         self.cstore_mut().process_path_extern(self.tcx, ident.name, orig_ident_span)
                     } else {
-                        self.cstore_mut().maybe_process_path_extern(self.tcx, ident.name)
+                        if !is_virtual {
+                            self.cstore_mut().maybe_process_path_extern(self.tcx, ident.name)
+                        } else {
+                            // TODO get a CrateNum here somehow
+                            // a `DefId` would probably suffice though
+                        }
                     };
                     crate_id.map(|crate_id| {
                         let def_id = crate_id.as_def_id();
@@ -2536,6 +2506,77 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
 
 pub(crate) fn is_namespaced_crate(crate_name: &str) -> bool {
     crate_name.contains("::")
+}
+
+fn build_extern_prelude(
+    tcx: TyCtxt<'_>,
+    attrs: &[ast::Attribute],
+) -> FxIndexMap<IdentKey, ExternPreludeEntry> {
+    let mut extern_prelude: FxIndexMap<IdentKey, ExternPreludeEntry> = tcx
+        .sess
+        .opts
+        .externs
+        .iter()
+        .filter_map(|(name, entry)| {
+            // Make sure `self`, `super`, `_` etc do not get into extern prelude.
+            // FIXME: reject `--extern self` and similar in option parsing instead.
+            if entry.add_prelude
+                && let sym = Symbol::intern(name)
+                && sym.can_be_raw()
+            {
+                Some((IdentKey::with_root_ctxt(sym), ExternPreludeEntry::flag()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Add virtual base entries for namespaced crates whose base segment
+    // is missing from the prelude (e.g. `foo::bar` without `foo`).
+    let missing_virtual_bases: Vec<IdentKey> = extern_prelude
+        .keys()
+        .filter_map(|ident| {
+            let (base, _) = ident.name.as_str().split_once("::")?;
+            let base_sym = Symbol::intern(base);
+            base_sym.can_be_raw().then(|| IdentKey::with_root_ctxt(base_sym))
+        })
+        .filter(|base_ident| !extern_prelude.contains_key(base_ident))
+        .collect();
+
+    extern_prelude.extend(
+        missing_virtual_bases.into_iter().map(|ident| (ident, ExternPreludeEntry::virtual_flag())),
+    );
+
+    // Inject `core` / `std` unless suppressed by attributes.
+    if !attr::contains_name(attrs, sym::no_core) {
+        extern_prelude.insert(IdentKey::with_root_ctxt(sym::core), ExternPreludeEntry::flag());
+
+        if !attr::contains_name(attrs, sym::no_std) {
+            extern_prelude.insert(IdentKey::with_root_ctxt(sym::std), ExternPreludeEntry::flag());
+        }
+    }
+
+    extern_prelude
+}
+
+// Creates a map for base path segment -> full path of all namespaced crates.
+fn get_namespaced_crate_names(tcx: TyCtxt<'_>) -> FxHashMap<&str, Vec<&str>> {
+    tcx.sess
+        .opts
+        .externs
+        .iter()
+        .filter(|(name, _)| is_namespaced_crate(name))
+        .map(|(name, _)| {
+            let main_crate_name = name
+                .split("::")
+                .nth(0)
+                .expect(&format!("namespaced crate name has unexpected form {}", name));
+            (main_crate_name, name.as_str())
+        })
+        .fold(FxHashMap::default(), |mut acc_map, (main_name, full_name)| {
+            acc_map.entry(main_name).or_insert_with(Vec::new).push(full_name);
+            acc_map
+        })
 }
 
 fn names_to_string(names: impl Iterator<Item = Symbol>) -> String {
