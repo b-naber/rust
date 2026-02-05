@@ -78,7 +78,7 @@ use rustc_session::lint::builtin::PRIVATE_MACRO_USE;
 use rustc_span::hygiene::{ExpnId, LocalExpnId, MacroKind, SyntaxContext, Transparency};
 use rustc_span::{DUMMY_SP, Ident, Span, Symbol, kw, sym};
 use smallvec::{SmallVec, smallvec};
-use tracing::debug;
+use tracing::{debug, instrument};
 
 type Res = def::Res<NodeId>;
 
@@ -1651,28 +1651,15 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     && let name = Symbol::intern(name)
                     && name.can_be_raw()
                 {
-                    let ident = if is_namespaced_crate(name.as_str()) {
-                        let crate_name_base = name
-                            .as_str()
-                            .split("::")
-                            .nth(0)
-                            .expect("namespaced crate name should contain '::'");
-
-                        if !namespaced_crate_names.contains_key(crate_name_base) {
-                            panic!("{} should be in `namespaced_crates`", name);
-                        }
-
-                        IdentKey::with_root_ctxt(Symbol::intern(crate_name_base))
-                    } else {
-                        IdentKey::with_root_ctxt(name)
-                    };
-
+                    // TODO need to add a virtual flag here
+                    let ident = IdentKey::with_root_ctxt(name);
                     Some((ident, ExternPreludeEntry::flag()))
                 } else {
                     None
                 }
             })
             .collect();
+
         debug!(?extern_prelude);
 
         if !attr::contains_name(attrs, sym::no_core) {
@@ -2339,6 +2326,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         })
     }
 
+    #[instrument(skip(self), level = "debug")]
     fn extern_prelude_get_flag(
         &self,
         ident: IdentKey,
@@ -2346,8 +2334,10 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
         finalize: bool,
     ) -> Option<Decl<'ra>> {
         let entry = self.extern_prelude.get(&ident);
+        debug!(?entry);
         entry.and_then(|entry| entry.flag_decl.as_ref()).and_then(|flag_decl| {
             let (pending_decl, finalized) = flag_decl.get();
+            debug!(?pending_decl);
             let decl = match pending_decl {
                 PendingDecl::Ready(decl) => {
                     if finalize && !finalized {
