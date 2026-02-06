@@ -1601,7 +1601,7 @@ impl<'tcx> Resolver<'_, 'tcx> {
 impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
     pub fn new(
         tcx: TyCtxt<'tcx>,
-        attrs: &[ast::Attribute],
+        attrs: &'ra [ast::Attribute],
         crate_span: Span,
         current_crate_outer_attr_insert_span: Span,
         arenas: &'ra ResolverArenas<'ra>,
@@ -2319,12 +2319,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     let crate_id = if finalize {
                         self.cstore_mut().process_path_extern(self.tcx, ident.name, orig_ident_span)
                     } else {
-                        if !is_virtual {
-                            self.cstore_mut().maybe_process_path_extern(self.tcx, ident.name)
-                        } else {
-                            // TODO get a CrateNum here somehow
-                            // a `DefId` would probably suffice though
-                        }
+                        self.cstore_mut().maybe_process_path_extern(self.tcx, ident.name)
                     };
                     crate_id.map(|crate_id| {
                         let def_id = crate_id.as_def_id();
@@ -2334,7 +2329,7 @@ impl<'ra, 'tcx> Resolver<'ra, 'tcx> {
                     })
                 }
             };
-            flag_decl.set((PendingDecl::Ready(decl), finalize || finalized));
+            flag_decl.set((PendingDecl::Ready(decl), finalize || finalized, is_virtual));
             decl.or_else(|| finalize.then_some(self.dummy_decl))
         })
     }
@@ -2508,11 +2503,11 @@ pub(crate) fn is_namespaced_crate(crate_name: &str) -> bool {
     crate_name.contains("::")
 }
 
-fn build_extern_prelude(
-    tcx: TyCtxt<'_>,
-    attrs: &[ast::Attribute],
-) -> FxIndexMap<IdentKey, ExternPreludeEntry> {
-    let mut extern_prelude: FxIndexMap<IdentKey, ExternPreludeEntry> = tcx
+fn build_extern_prelude<'tcx, 'ra>(
+    tcx: TyCtxt<'tcx>,
+    attrs: &'ra [ast::Attribute],
+) -> FxIndexMap<IdentKey, ExternPreludeEntry<'ra>> {
+    let mut extern_prelude: FxIndexMap<IdentKey, ExternPreludeEntry<'ra>> = tcx
         .sess
         .opts
         .externs
