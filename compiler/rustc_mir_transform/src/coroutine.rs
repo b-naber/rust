@@ -865,6 +865,7 @@ fn locals_live_across_suspend_points<'tcx>(
 /// `CoroutineSavedLocal` is indexed in terms of the elements in this set;
 /// i.e. `CoroutineSavedLocal::new(1)` corresponds to the second local
 /// included in this set.
+#[derive(Debug)]
 struct CoroutineSavedLocals(DenseBitSet<Local>);
 
 impl CoroutineSavedLocals {
@@ -1475,6 +1476,7 @@ pub(crate) fn mir_coroutine_witnesses<'tcx>(
     let always_live_locals = always_storage_live_locals(body);
     let liveness_info = locals_live_across_suspend_points(tcx, body, &always_live_locals, movable);
 
+    debug!("saved_locals: {:?}", liveness_info.saved_locals);
     let mut self_referential_fields_finder =
         SelfReferentialFieldsFinder::new(&liveness_info.saved_locals);
     self_referential_fields_finder.visit_body(body);
@@ -1912,10 +1914,50 @@ impl<'a> SelfReferentialFieldsFinder<'a> {
 }
 
 impl<'tcx> Visitor<'tcx> for SelfReferentialFieldsFinder<'_> {
+    #[instrument(skip(self), level = "debug")]
+    fn visit_statement(&mut self, statement: &Statement<'tcx>, location: Location) {
+        self.super_statement(statement, location);
+    }
+
+    #[instrument(skip(self), level = "debug")]
+    fn visit_terminator(&mut self, terminator: &Terminator<'tcx>, location: Location) {
+        match &terminator.kind {
+            TerminatorKind::Call { func, args, destination, .. } => {
+                debug!(?func);
+                debug!(?args);
+                debug!(?destination);
+            }
+            _ => {}
+        }
+        self.super_terminator(terminator, location);
+    }
+
+    #[instrument(skip(self), level = "debug")]
     fn visit_assign(&mut self, place: &Place<'tcx>, rvalue: &Rvalue<'tcx>, _loc: Location) {
+        match rvalue {
+            Rvalue::Ref(_, _, borrowed_place) => {
+                debug!(?borrowed_place);
+            }
+            Rvalue::RawPtr(_, place) => {
+                debug!(?place);
+            }
+            Rvalue::Aggregate(kind, fields) => {
+                debug!(?kind);
+                debug!(?fields);
+            }
+            Rvalue::Discriminant(place) => {
+                debug!(?place);
+            }
+            Rvalue::Use(op) => {
+                debug!(?op);
+            }
+            _ => {}
+        }
+
         if let Some(_) = self.saved_locals.get(place.local) {
             match rvalue {
                 Rvalue::Ref(_, _, borrowed_place) => {
+                    debug!(?borrowed_place);
                     if let Some(_) = self.saved_locals.get(borrowed_place.local) {
                         self.locals_requiring_unsafe_pinned.insert(borrowed_place.local);
                     }
