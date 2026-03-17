@@ -1990,6 +1990,16 @@ fn check_must_not_suspend_ty<'tcx>(
                 SuspendCheckData { descr_pre: &format!("{}allocator ", data.descr_pre), ..data },
             )
         }
+        ty::Adt(def, args) if def.is_unsafe_pinned() => {
+            let inner_ty = args.type_at(0);
+            debug!(?inner_ty);
+            check_must_not_suspend_ty(
+                tcx,
+                inner_ty,
+                hir_id,
+                SuspendCheckData { descr_pre: &format!("{}boxed ", data.descr_pre), ..data },
+            )
+        }
         // FIXME(sized_hierarchy): This should be replaced with a requirement that types in
         // coroutines implement `const Sized`. Scalable vectors are temporarily `Sized` while
         // `feature(sized_hierarchy)` is not fully implemented, but in practice are
@@ -2119,7 +2129,12 @@ fn find_locals_needing_unsafe_pinned<'tcx>(
     body: &Body<'_>,
     mut self_referential_fields: DenseBitSet<Local>,
 ) -> DenseBitSet<Local> {
-    let mut pinned_locals_finder = PinnedLocalsFinder::new(tcx);
+    // We use the DefId of `Pin::new_unchecked` when looking for pinned locals
+    let Some(pin_fn) = tcx.lang_items().new_unchecked_fn() else {
+        return self_referential_fields;
+    };
+
+    let mut pinned_locals_finder = PinnedLocalsFinder::new(pin_fn);
     pinned_locals_finder.visit_body(body);
     let pinned_locals = pinned_locals_finder.pinned_locals;
     debug!(?pinned_locals);
@@ -2137,9 +2152,8 @@ struct PinnedLocalsFinder {
     pinned_locals: Vec<(Local, Location)>,
 }
 
-impl<'tcx> PinnedLocalsFinder {
-    fn new(tcx: TyCtxt<'tcx>) -> Self {
-        let pin_fn = tcx.require_lang_item(LangItem::PinNewUnchecked, DUMMY_SP);
+impl PinnedLocalsFinder {
+    fn new(pin_fn: DefId) -> Self {
         PinnedLocalsFinder { pin_fn, pinned_locals: vec![] }
     }
 }
